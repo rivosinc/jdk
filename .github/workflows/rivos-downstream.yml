@@ -39,6 +39,7 @@ concurrency:
 
 permissions:
   pull-requests: write
+  repository-projects: write
 
 jobs:
   fetch-push-pr:
@@ -46,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          token: ${{ secrets.WORKFLOW_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: "Fetch"
         run: |
           git remote add upstream https://github.com/openjdk/jdk.git
