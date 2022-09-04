@@ -26,6 +26,9 @@
 name: 'OpenJDK Downstreaming'
 
 on:
+  push:
+    branches:
+      - dev/ludovic/ci-github-milestone
   schedule:
     # Trigger on every Mondays at 07:00 UTC (09:00 CET, 00:00 PT)
     - cron: '0 6 * * 1'
