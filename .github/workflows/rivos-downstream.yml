@@ -23,7 +23,7 @@
 # questions.
 #
 
-name: 'OpenJDK Downstreaming'
+name: '[Rivos] Downstream'
 
 on:
   push:
