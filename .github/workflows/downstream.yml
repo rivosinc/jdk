@@ -45,8 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.WORKFLOW_TOKEN }}
       - name: "Fetch"
         run: |
           git remote add upstream https://github.com/openjdk/jdk.git
@@ -54,7 +52,7 @@ jobs:
       - name: "Set Tag"
         id: set-tag
         run: |
-          TAG=$(git tag | grep --extended-regexp '^jdk\-.*' | sort --version-sort | tail --lines 1 | tr --delete '\n')
+          TAG=$(git tag --list | grep --extended-regexp '^jdk([0-9]+\-b[0-9]+|-[0-9]+(\+[0-9]+|\-ga))$' | sort --version-sort | tail --lines 1 | tr --delete '\n')
           test -n "$TAG"
           echo "::set-output name=tag::$TAG"
       - name: "Push"
