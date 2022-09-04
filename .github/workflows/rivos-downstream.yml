@@ -39,7 +39,7 @@ concurrency:
 
 permissions:
   pull-requests: write
-  repository-projects: write
+  contents: write
 
 jobs:
   fetch-push-pr:
