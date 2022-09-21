@@ -29,14 +29,36 @@ import org.openjdk.jmh.profile.InternalProfiler;
 import org.openjdk.jmh.results.IterationResult;
 import org.openjdk.jmh.results.Result;
 
+import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Map;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;;
 
 public class Gem5CheckpointProfiler implements InternalProfiler {
+
+    static final Object gem5Instance;
+    static final Method gem5CheckpointMethod;
+
     static {
-        System.loadLibrary("Gem5CheckpointProfilerJNI");
+        try {
+            Class<?> gem5Class = Class.forName("gem5.Ops");
+            gem5CheckpointMethod = getGem5CheckpointMethod(gem5Class);
+            gem5Instance = getGem5Instance(gem5Class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load Gem5 Ops", e);
+        }
+    }
+
+    private static Method getGem5CheckpointMethod(Class<?> gem5Class) throws Exception {
+        // void checkpoint(long ns_delay, long ns_period)
+        return gem5Class.getMethod("checkpoint", long.class, long.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object getGem5Instance(Class<?> gem5Class) throws Exception {
+        return ((Map<String, Object>)gem5Class.getField("callTypes").get(null)).get("default");
     }
 
     /**
@@ -54,8 +76,12 @@ public class Gem5CheckpointProfiler implements InternalProfiler {
      * @param iterationParams iteration parameters used for current launch
      */
     public void beforeIteration(BenchmarkParams benchmarkParams, IterationParams iterationParams) {
-        // artificially delay by 1us to not capture the setting up of the iterations
-        m5_checkpoint(1000, iterationParams.getTime().convertTo(NANOSECONDS));
+        try {
+            // artificially delay by 1us to not capture the setting up of the iterations
+            gem5CheckpointMethod.invoke(gem5Instance, Long.valueOf(1000), Long.valueOf(iterationParams.getTime().convertTo(NANOSECONDS)));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to ivoke Gem5 checkpointing", e);
+        }
     }
 
     /**
