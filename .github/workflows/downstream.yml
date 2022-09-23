@@ -27,8 +27,11 @@ name: 'OpenJDK Downstreaming'
 
 on:
   schedule:
-    # Trigger on every day at 07:00 UTC (09:00 CET, 00:00 PT)
-    - cron: '0 6 * * 1-5'
+    # Trigger on Sunday to Friday at 21:00 UTC (23:00 CET, 14:00 PT)
+    # It triggers at least 9 hours before start of the working day in CET
+    # since that's when I would want to review it. And given GHA takes a long
+    # time to run, we want to start doing it as early as possible
+    - cron: '0 21 * * 0-4'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
