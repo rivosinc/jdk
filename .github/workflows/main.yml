@@ -26,9 +26,9 @@
 name: 'OpenJDK GHA Sanity Checks'
 
 on:
-  push:
-    branches-ignore:
-      - pr/*
+  pull_request:
+    branches:
+      - rivos/main
   workflow_dispatch:
     inputs:
       platforms:
