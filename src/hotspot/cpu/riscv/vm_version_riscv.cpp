@@ -178,9 +178,18 @@ void VM_Version::initialize() {
     if (FLAG_IS_DEFAULT(BlockZeroingLowLimit)) {
       FLAG_SET_DEFAULT(BlockZeroingLowLimit, 2 * CacheLineSize);
     }
-  } else if (UseBlockZeroing) {
-    warning("Block zeroing is not available");
-    FLAG_SET_DEFAULT(UseBlockZeroing, false);
+    // if (AllocatePrefetchZeroing) {
+    //   FLAG_SET_DEFAULT(AllocatePrefetchZeroing, true);
+    // }
+  } else {
+    if (UseBlockZeroing) {
+      warning("Block zeroing is not available on this CPU");
+      FLAG_SET_DEFAULT(UseBlockZeroing, false);
+    }
+    if (AllocatePrefetchZeroing) {
+      warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+      FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+    }
   }
 
   char buf[512];
@@ -237,9 +246,9 @@ void VM_Version::c2_initialize() {
     }
   }
 
-  if (!UseZicbop) {
-    if (!FLAG_IS_DEFAULT(AllocatePrefetchStyle)) {
-      warning("Zicbop is not available on this CPU");
+  if (!UseZicbop && !(UseZicboz && AllocatePrefetchZeroing)) {
+    if (AllocatePrefetchStyle && !FLAG_IS_DEFAULT(AllocatePrefetchStyle)) {
+      warning("AllocatePrefetchStyle specified, but neither Zicbop nor Zicboz available on this CPU");
     }
     FLAG_SET_DEFAULT(AllocatePrefetchStyle, 0);
   } else {

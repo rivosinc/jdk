@@ -1034,6 +1034,7 @@ static void match_alias_type(Compile* C, Node* n, Node* m) {
   if (nidx == Compile::AliasIdxTop && midx == Compile::AliasIdxRaw) {
     switch (n->Opcode()) {
     case Op_PrefetchAllocation:
+    case Op_PrefetchAllocationZeroing:
       nidx = Compile::AliasIdxRaw;
       nat = TypeRawPtr::BOTTOM;
       break;

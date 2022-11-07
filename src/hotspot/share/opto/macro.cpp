@@ -1164,8 +1164,8 @@ Node* PhaseMacroExpand::make_store(Node* ctl, Node* mem, Node* base, int offset,
 // down.  If contended, repeat at step 3.  If using TLABs normal-store
 // adjusted heap top back down; there is no contention.
 //
-// 6) If !ZeroTLAB then Bulk-clear the object/array.  Fill in klass & mark
-// fields.
+// 6) If !(ZeroTLAB || AllocatePrefetchZeroing) then Bulk-clear the object/array.
+// Fill in klass & mark fields.
 //
 // 7) Merge with the slow-path; cast the raw memory pointer to the correct
 // oop flavor.
@@ -1689,7 +1689,7 @@ PhaseMacroExpand::initialize_object(AllocateNode* alloc,
     // there can be two Allocates to one Initialize.  The answer in all these
     // edge cases is safety first.  It is always safe to clear immediately
     // within an Allocate, and then (maybe or maybe not) clear some more later.
-    if (!(UseTLAB && ZeroTLAB)) {
+    if (!(UseTLAB && (ZeroTLAB || AllocatePrefetchZeroing))) {
       rawmem = ClearArrayNode::clear_memory(control, rawmem, object,
                                             header_size, size_in_bytes,
                                             &_igvn);
@@ -1715,9 +1715,119 @@ PhaseMacroExpand::initialize_object(AllocateNode* alloc,
 Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
                                         Node*& contended_phi_rawmem,
                                         Node* old_eden_top, Node* new_eden_top,
-                                        intx lines) {
+                                        // Node* old_pf_top, Node* new_pf_top,
+                                        intx prefetch_lines) {
    enum { fall_in_path = 1, pf_path = 2 };
-   if( UseTLAB && AllocatePrefetchStyle == 2 ) {
+   if( UseTLAB && AllocatePrefetchZeroing ) {
+      // Generate zeroing prefetch allocation with watermark check.
+      // As an allocation hits the watermark, we will start zeroing
+      // prefetch keeping a distance of `prefetch_lines`
+
+      // Algorithm:
+      //   old_pf_top = Thread::current()->tlab().pf_top();
+      //   // round down to cache line start
+      //   new_pf_top = new_eden_top & ~(AllocatePrefetchStepSize - 1);
+      //   // Add `prefetch_lines` more cache lines
+      //   new_pf_top += (prefetch_lines + 1) * AllocatePrefetchStepSize;
+      //
+      //   if (new_pf_top > old_pf_top) {
+      //     // store back `new_pf_top`
+      //     Thread::current()->tlab().set_pf_top(new_pf_top);
+      //
+      //     do {
+      //       cbo_zero(old_pf_top);
+      //       old_pf_top += AllocatePrefetchStepSize;
+      //     } while (new_pf_top > old_pf_top)
+      //   }
+
+      Node *pf_region = new RegionNode(4);
+      Node *pf_phi_rawmem = new PhiNode( pf_region, Type::MEMORY,
+                                                TypeRawPtr::BOTTOM );
+      // I/O is used for Prefetch
+      Node *pf_phi_abio = new PhiNode( pf_region, Type::ABIO );
+      Node *pf_phi_while = new PhiNode( pf_region, Type::ABIO );
+
+      Node *thread = new ThreadLocalNode();
+      transform_later(thread);
+
+      Node *eden_pf_adr = new AddPNode( top()/*not oop*/, thread,
+                   _igvn.MakeConX(in_bytes(JavaThread::tlab_pf_top_offset())) );
+      transform_later(eden_pf_adr);
+
+      Node *old_pf_top = new LoadPNode(needgc_false,
+                                   contended_phi_rawmem, eden_pf_adr,
+                                   TypeRawPtr::BOTTOM, TypeRawPtr::BOTTOM,
+                                   MemNode::unordered);
+      transform_later(old_pf_top);
+
+      Node *new_pf_top = new CastP2XNode(needgc_false, new_eden_top);
+      transform_later(new_pf_top);
+      new_pf_top = new AndXNode(new_pf_top,
+                                _igvn.MakeConX(~(intptr_t)(AllocatePrefetchStepSize - 1)));
+      transform_later(new_pf_top);
+      new_pf_top = new CastX2PNode(new_pf_top);
+      transform_later(new_pf_top);
+      new_pf_top = new AddPNode(new_pf_top, new_pf_top,
+                                _igvn.MakeConX((prefetch_lines + 1) * AllocatePrefetchStepSize));
+
+      // check against old_pf_top
+      Node *need_pf_cmp = new CmpPNode( new_pf_top, old_pf_top );
+      transform_later(need_pf_cmp);
+      Node *need_pf_bol = new BoolNode( need_pf_cmp, BoolTest::gt );
+      transform_later(need_pf_bol);
+      IfNode *need_pf_iff = new IfNode( needgc_false, need_pf_bol,
+                                       PROB_STATIC_FREQUENT, COUNT_UNKNOWN );
+      transform_later(need_pf_iff);
+
+      // true node, add prefetchdistance
+      Node *need_pf_true = new IfTrueNode( need_pf_iff );
+      transform_later(need_pf_true);
+
+      Node *need_pf_false = new IfFalseNode( need_pf_iff );
+      transform_later(need_pf_false);
+
+      Node *store_new_wmt = new StorePNode(need_pf_true,
+                                       contended_phi_rawmem, eden_pf_adr,
+                                       TypeRawPtr::BOTTOM, new_pf_top,
+                                       MemNode::unordered);
+      transform_later(store_new_wmt);
+
+      Node *prefetch = new PrefetchAllocationZeroingNode( i_o, old_pf_top );
+      transform_later(prefetch);
+      i_o = prefetch;
+
+      old_pf_top = new AddPNode(prefetch, old_pf_top,
+                                _igvn.MakeConX(AllocatePrefetchStepSize));
+
+      // while (new_pf_top > old_pf_top)
+      Node *while_pf_cmp = new CmpPNode( new_pf_top, old_pf_top );
+      transform_later(while_pf_cmp);
+      Node *while_pf_bol = new BoolNode( while_pf_cmp, BoolTest::gt );
+      transform_later(while_pf_bol);
+      IfNode *while_pf_iff = new IfNode( needgc_false, while_pf_bol,
+                                        PROB_FAIR, COUNT_UNKNOWN );
+      transform_later(while_pf_iff);
+      Node *while_pf_true = new IfTrueNode( while_pf_iff );
+      transform_later(while_pf_true);
+      Node *while_pf_false = new IfFalseNode( while_pf_iff );
+      transform_later(while_pf_false);
+
+      pf_phi_abio->set_req( pf_path, i_o );
+
+      pf_region->init_req( fall_in_path, need_pf_false );
+      pf_region->init_req( pf_path, need_pf_true );
+
+      pf_phi_rawmem->init_req( fall_in_path, prefetch );
+      pf_phi_rawmem->init_req( pf_path, while_pf_false );
+
+      transform_later(pf_region);
+      transform_later(pf_phi_rawmem);
+      transform_later(pf_phi_abio);
+
+      needgc_false = pf_region;
+      contended_phi_rawmem = pf_phi_rawmem;
+      i_o = pf_phi_abio;
+   } else if( UseTLAB && AllocatePrefetchStyle == 2 ) {
       // Generate prefetch allocation with watermark check.
       // As an allocation hits the watermark, we will prefetch starting
       // at a "distance" away from watermark.
@@ -1776,7 +1886,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       uint step_size = AllocatePrefetchStepSize;
       uint distance = 0;
 
-      for ( intx i = 0; i < lines; i++ ) {
+      for ( intx i = 0; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( old_pf_wm, new_pf_wmt,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);
@@ -1829,7 +1939,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       contended_phi_rawmem = prefetch;
       Node *prefetch_adr;
       distance = step_size;
-      for ( intx i = 1; i < lines; i++ ) {
+      for ( intx i = 1; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( cache_adr, cache_adr,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);
@@ -1845,7 +1955,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       // Generate several prefetch instructions.
       uint step_size = AllocatePrefetchStepSize;
       uint distance = AllocatePrefetchDistance;
-      for ( intx i = 0; i < lines; i++ ) {
+      for ( intx i = 0; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( old_eden_top, new_eden_top,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);

@@ -745,7 +745,8 @@ Node* BarrierSetC2::obj_allocate(PhaseMacroExpand* macro, Node* mem, Node* toobi
 
   // Fast path:
   i_o = macro->prefetch_allocation(i_o, needgc_false, mem,
-                                   old_tlab_top, new_tlab_top, prefetch_lines);
+                                   old_tlab_top, new_tlab_top,
+                                   prefetch_lines);
 
   // Store the modified TLAB top back down.
   Node* store_tlab_top = new StorePNode(needgc_false, mem, tlab_top_adr,

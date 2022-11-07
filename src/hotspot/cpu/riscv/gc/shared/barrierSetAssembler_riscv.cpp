@@ -135,6 +135,7 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
                                         Register tmp2,
                                         Label& slow_case,
                                         bool is_far) {
+  assert(!AllocatePrefetchZeroing, "not supported");
   assert_different_registers(obj, tmp2);
   assert_different_registers(obj, var_size_in_bytes);
   Register end = tmp2;

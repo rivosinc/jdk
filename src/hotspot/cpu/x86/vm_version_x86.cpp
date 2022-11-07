@@ -1200,6 +1200,11 @@ void VM_Version::get_processor_features() {
     vm_exit_during_initialization("RTM instructions are not available on this CPU");
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
 #if INCLUDE_RTM_OPT
   if (UseRTMLocking) {
     if (!CompilerConfig::is_c2_enabled()) {

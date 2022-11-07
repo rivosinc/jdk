@@ -4371,7 +4371,7 @@ Node* InitializeNode::complete_stores(Node* rawctl, Node* rawmem, Node* rawptr,
   bool do_zeroing = true;       // we might give up if inits are very sparse
   int  big_init_gaps = 0;       // how many large gaps have we seen?
 
-  if (UseTLAB && ZeroTLAB)  do_zeroing = false;
+  if (UseTLAB && (ZeroTLAB || AllocatePrefetchZeroing))  do_zeroing = false;
   if (!ReduceFieldZeroing && !ReduceBulkZeroing)  do_zeroing = false;
 
   for (uint i = InitializeNode::RawStores, limit = req(); i < limit; i++) {

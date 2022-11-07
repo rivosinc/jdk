@@ -116,6 +116,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
   // Enable error context decoding on known platforms
 #if defined(IA32) || defined(AMD64) || defined(ARM) || \
     defined(AARCH64) || defined(PPC) || defined(RISCV) || \

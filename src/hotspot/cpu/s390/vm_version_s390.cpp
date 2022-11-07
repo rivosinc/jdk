@@ -287,6 +287,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UsePopCountInstruction, true);
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
   // z/Architecture supports 8-byte compare-exchange operations
   // (see Atomic::cmpxchg)
   // and 'atomic long memory ops' (see Unsafe_GetLongVolatile).

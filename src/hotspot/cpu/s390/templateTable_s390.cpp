@@ -3780,6 +3780,8 @@ void TemplateTable::_new() {
   // Note: compared to other architectures, s390's implementation always goes
   // to the slow path if TLAB is used and fails.
   if (UseTLAB) {
+    assert(!AllocatePrefetchZeroing, "not supported");
+
     Register RoldTopValue = RallocatedObject;
     Register RnewTopValue = tmp;
     __ z_lg(RoldTopValue, Address(Z_thread, JavaThread::tlab_top_offset()));

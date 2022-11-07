@@ -2083,6 +2083,7 @@ void MacroAssembler::tlab_allocate(
   Register t1,                       // temp register
   Label&   slow_case                 // continuation point if fast allocation fails
 ) {
+  assert(!AllocatePrefetchZeroing, "not supported");
   // make sure arguments make sense
   assert_different_registers(obj, var_size_in_bytes, t1);
   assert(0 <= con_size_in_bytes && is_simm16(con_size_in_bytes), "illegal object size");

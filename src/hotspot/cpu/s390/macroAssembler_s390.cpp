@@ -2701,6 +2701,7 @@ void MacroAssembler::tlab_allocate(Register obj,
                                    int con_size_in_bytes,
                                    Register t1,
                                    Label& slow_case) {
+  assert(!AllocatePrefetchZeroing, "not supported");
   assert_different_registers(obj, var_size_in_bytes, t1);
   Register end = t1;
   Register thread = Z_thread;

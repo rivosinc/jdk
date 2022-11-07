@@ -145,6 +145,7 @@ void BarrierSetAssembler::store_at(MacroAssembler* masm, DecoratorSet decorators
 // Puts address of allocated object into register `obj` and end of allocated object into register `obj_end`.
 void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj, Register obj_end, Register tmp1,
                                  RegisterOrConstant size_expression, Label& slow_case) {
+  assert(!AllocatePrefetchZeroing, "not supported");
   const Register tlab_end = tmp1;
   assert_different_registers(obj, obj_end, tlab_end);
 

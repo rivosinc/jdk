@@ -263,6 +263,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
 #ifdef COMPILER2
   // C2 is only supported on v7+ VFP at this time
   if (_arm_arch < 7 || !has_vfp()) {

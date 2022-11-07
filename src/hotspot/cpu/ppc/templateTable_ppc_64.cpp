@@ -3761,6 +3761,8 @@ void TemplateTable::_new() {
     // 1) Try to allocate in the TLAB.
     // 2) If the above fails (or is not applicable), go to a slow case (creates a new TLAB, etc.).
 
+    assert(!AllocatePrefetchZeroing, "not supported");
+
     Register RoldTopValue = RallocatedObject; // Object will be allocated here if it fits.
     Register RnewTopValue = R6_ARG4;
     Register RendValue    = R7_ARG5;

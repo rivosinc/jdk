@@ -353,6 +353,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA, false);
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU.");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
 #ifdef COMPILER2
   if (FLAG_IS_DEFAULT(UseSquareToLenIntrinsic)) {
     UseSquareToLenIntrinsic = true;

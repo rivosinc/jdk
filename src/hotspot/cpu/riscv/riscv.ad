@@ -5214,7 +5214,7 @@ instruct prefetchalloc( memory mem ) %{
   predicate(UseZicbop);
   match(PrefetchAllocation mem);
 
-  ins_cost(ALU_COST * 3);
+  ins_cost(ALU_COST * 2);
   format %{ "prefetch_w $mem\t# Prefetch for write" %}
 
   ins_encode %{
@@ -5224,6 +5224,21 @@ instruct prefetchalloc( memory mem ) %{
       __ addi(t0, as_Register($mem$$base), $mem$$disp);
       __ prefetch_w(t0, 0);
     }
+  %}
+
+  ins_pipe(iload_prefetch);
+%}
+
+instruct prefetchallocZeroing( memory mem ) %{
+  predicate(UseZicboz && AllocatePrefetchZeroing);
+  match(PrefetchAllocationZeroing mem);
+
+  ins_cost(ALU_COST * 2);
+  format %{ "cbo_zero $mem\t# Prefetch+Zero for write" %}
+
+  ins_encode %{
+    __ addi(t0, as_Register($mem$$base), $mem$$disp);
+    __ cbo_zero(t0, 0);
   %}
 
   ins_pipe(iload_prefetch);

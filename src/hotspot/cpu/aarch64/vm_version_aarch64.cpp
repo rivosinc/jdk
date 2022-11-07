@@ -412,6 +412,11 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UsePopCountInstruction, true);
   }
 
+  if (AllocatePrefetchZeroing) {
+    warning("AllocatePrefetchZeroing specified, but not available on this CPU");
+    FLAG_SET_DEFAULT(AllocatePrefetchZeroing, false);
+  }
+
   if (!UsePopCountInstruction) {
     warning("UsePopCountInstruction is always enabled on this CPU");
     UsePopCountInstruction = true;
