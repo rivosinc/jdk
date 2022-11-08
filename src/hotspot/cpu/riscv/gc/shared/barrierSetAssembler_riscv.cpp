@@ -135,8 +135,7 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
                                         Register tmp2,
                                         Label& slow_case,
                                         bool is_far) {
-  assert(!AllocatePrefetchZeroing, "not supported");
-  assert_different_registers(obj, tmp2);
+  assert_different_registers(obj, tmp1, tmp2, noreg);
   assert_different_registers(obj, var_size_in_bytes);
   Register end = tmp2;
 
@@ -155,6 +154,33 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
   // recover var_size_in_bytes if necessary
   if (var_size_in_bytes == end) {
     __ sub(var_size_in_bytes, var_size_in_bytes, obj);
+  }
+
+  if (AllocatePrefetchZeroing) {
+    Label LOOP, END;
+    const int pf_size = AllocatePrefetchStepSize;
+    const int pf_mask = ~(pf_size - 1);
+    const int pf_distance =
+      pf_size * (MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines) + 1);
+    Register old_pf_top = tmp1, new_pf_top = tmp2 /* reuses tmp2 from end, no overlap */;
+    // old_pf_top = Thread::curent()->tlab().pf_top();
+    __ ld(old_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+    // new_pf_top = (end & ~(pf_size - 1)) + pf_distance;
+    __ andi(new_pf_top, end, pf_mask);
+    __ addi(new_pf_top, new_pf_top, pf_distance);
+    // if (old_pf_top < new_pf_top) {
+    __ bgeu(old_pf_top, new_pf_top, END);
+    // Thread::curent()->tlab().set_pf_top(new_pf_top)
+    __ sd(new_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+    // do {
+    // zero-out cache line at old_pf_top
+    __ cbo_zero(old_pf_top);
+    // old_pf_top += pf_size;
+    __ addi(old_pf_top, old_pf_top, pf_size);
+    // } while (old_pf_top < new_pf_top);
+    __ bltu(old_pf_top, new_pf_top, LOOP);
+    // }
+    __ bind(END);
   }
 }
 

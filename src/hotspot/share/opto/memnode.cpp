@@ -4472,7 +4472,7 @@ Node* InitializeNode::complete_stores(Node* rawctl, Node* rawmem, Node* rawptr,
   remove_extra_zeroes();        // clear out all the zmems left over
   add_req(inits);
 
-  if (!(UseTLAB && ZeroTLAB)) {
+  if (!(UseTLAB && (ZeroTLAB || AllocatePrefetchZeroing))) {
     // If anything remains to be zeroed, zero it all now.
     zeroes_done = align_down(zeroes_done, BytesPerInt);
     // if it is the last unused 4 bytes of an instance, forget about it
