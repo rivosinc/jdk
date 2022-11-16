@@ -36,16 +36,21 @@ uint32_t VM_Version::_initial_vector_length = 0;
 void VM_Version::initialize() {
   get_os_cpu_info();
 
+  if (UseRVC && !(_features & CPU_C)) {
+    warning("RVC is not supported on this CPU");
+    FLAG_SET_DEFAULT(UseRVC, false);
+  }
+
   // https://github.com/riscv/riscv-profiles/blob/main/profiles.adoc#rva20-profiles
   if (UseRVA20U64) {
-    if (FLAG_IS_DEFAULT(UseRVC)) {
-      FLAG_SET_DEFAULT(UseRVC, true);
+    if (!UseRVC) {
+      vm_exit_during_initialization("UseRVA20U64 is enabled but UseRVC isn't, RVC is a mandatory extension in RVA20U64");
     }
   }
   // https://github.com/riscv/riscv-profiles/blob/main/profiles.adoc#rva22-profiles
   if (UseRVA22U64) {
-    if (FLAG_IS_DEFAULT(UseRVC)) {
-      FLAG_SET_DEFAULT(UseRVC, true);
+    if (!UseRVC) {
+      vm_exit_during_initialization("UseRVA20U64 is enabled but UseRVC isn't, RVC is a mandatory extension in RVA20U64");
     }
     if (FLAG_IS_DEFAULT(UseZba)) {
       FLAG_SET_DEFAULT(UseZba, true);
@@ -152,11 +157,6 @@ void VM_Version::initialize() {
       // read vector length from vector CSR vlenb
       _initial_vector_length = get_current_vector_length();
     }
-  }
-
-  if (UseRVC && !(_features & CPU_C)) {
-    warning("RVC is not supported on this CPU");
-    FLAG_SET_DEFAULT(UseRVC, false);
   }
 
   if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
