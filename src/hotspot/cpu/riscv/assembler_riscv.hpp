@@ -1242,6 +1242,10 @@ enum VectorMask {
   INSN(vnmsac_vv, 0b1010111, 0b010, 0b101111);
   INSN(vmacc_vv,  0b1010111, 0b010, 0b101101);
 
+  // Vector Register Gather Instructions
+  INSN(vrgather_vv,     0b1010111, 0b000, 0b001100);
+  INSN(vrgatherei16_vv, 0b1010111, 0b000, 0b001110);
+
 #undef INSN
 
 #define INSN(NAME, op, funct3, funct6)                                                             \
@@ -1254,8 +1258,6 @@ enum VectorMask {
   INSN(vmadd_vx,  0b1010111, 0b110, 0b101001);
   INSN(vnmsac_vx, 0b1010111, 0b110, 0b101111);
   INSN(vmacc_vx,  0b1010111, 0b110, 0b101101);
-
-  INSN(vrsub_vx,  0b1010111, 0b100, 0b000011);
 
 #undef INSN
 
@@ -1414,8 +1416,9 @@ enum VectorMask {
   INSN(vand_vx, 0b1010111, 0b100, 0b001001);
 
   // Vector Single-Width Integer Add and Subtract
-  INSN(vsub_vx, 0b1010111, 0b100, 0b000010);
-  INSN(vadd_vx, 0b1010111, 0b100, 0b000000);
+  INSN(vsub_vx,  0b1010111, 0b100, 0b000010);
+  INSN(vadd_vx,  0b1010111, 0b100, 0b000000);
+  INSN(vrsub_vx, 0b1010111, 0b100, 0b000011);
 
 #undef INSN
 
@@ -1456,7 +1459,7 @@ enum VectorMask {
 #define INSN(NAME, op, funct3, funct6)                                                             \
   void NAME(VectorRegister Vd, VectorRegister Vs2, int32_t imm, VectorMask vm = unmasked) {        \
     guarantee(is_imm_in_range(imm, 5, 0), "imm is invalid");                                       \
-    patch_VArith(op, Vd, funct3, (uint32_t)imm & 0x1f, Vs2, vm, funct6);                           \
+    patch_VArith(op, Vd, funct3, (uint32_t)(imm & 0x1f), Vs2, vm, funct6);                         \
   }
 
   INSN(vmsgt_vi,  0b1010111, 0b011, 0b011111);
@@ -1469,16 +1472,7 @@ enum VectorMask {
   INSN(vor_vi,    0b1010111, 0b011, 0b001010);
   INSN(vand_vi,   0b1010111, 0b011, 0b001001);
   INSN(vadd_vi,   0b1010111, 0b011, 0b000000);
-
-#undef INSN
-
-#define INSN(NAME, op, funct3, funct6)                                                             \
-  void NAME(VectorRegister Vd, int32_t imm, VectorRegister Vs2, VectorMask vm = unmasked) {        \
-    guarantee(is_imm_in_range(imm, 5, 0), "imm is invalid");                                       \
-    patch_VArith(op, Vd, funct3, (uint32_t)(imm & 0x1f), Vs2, vm, funct6);                         \
-  }
-
-  INSN(vrsub_vi, 0b1010111, 0b011, 0b000011);
+  INSN(vrsub_vi,  0b1010111, 0b011, 0b000011);
 
 #undef INSN
 
@@ -1499,6 +1493,28 @@ enum VectorMask {
   INSN(vmandn_mm,   0b1010111, 0b010, 0b1, 0b011000);
   INSN(vmnand_mm,   0b1010111, 0b010, 0b1, 0b011101);
   INSN(vmand_mm,    0b1010111, 0b010, 0b1, 0b011001);
+
+#undef INSN
+
+#define INSN(NAME, op, funct3, vm, funct6)                                   \
+  void NAME(VectorRegister Vd, VectorRegister Vs1, VectorRegister Vs2) {     \
+    patch_VArith(op, Vd, funct3, Vs1->raw_encoding(), Vs2, vm, funct6);      \
+  }
+
+  // Vector Integer Merge Instructions
+  INSN(vmerge_vvm,  0b1010111, 0b000, 0b0, 0b010111);
+
+#undef INSN
+
+#define INSN(NAME, op, funct3, vm, funct6)                                   \
+  void NAME(VectorRegister Vd, VectorRegister Vs1, VectorRegister Vs2) {     \
+    patch_VArith(op, Vd, funct3, Vs1->raw_encoding(), Vs2, vm, funct6);      \
+  }
+
+  // Vector SHA-2 Instructions
+  INSN(vsha2ms_vv,  0b0001011, 0b000, 0b1, 0b100000);
+  INSN(vsha2cl_vv,  0b0001011, 0b000, 0b1, 0b100001);
+  INSN(vsha2ch_vv,  0b0001011, 0b000, 0b1, 0b100010);
 
 #undef INSN
 
@@ -1589,14 +1605,29 @@ enum Nf {
     patch_reg((address)&insn, 15, Rs1);                                  \
     emit(insn)
 
-#define INSN(NAME, op, lumop, vm, mop, nf)                                           \
-  void NAME(VectorRegister Vd, Register Rs1, uint32_t width = 0, bool mew = false) { \
-    guarantee(is_unsigned_imm_in_range(width, 3, 0), "width is invalid");            \
+#define INSN(NAME, op, width, lumop, vm, mop, mew, nf)                               \
+  void NAME(VectorRegister Vd, Register Rs1) {                                       \
+    assert(is_unsigned_imm_in_range(width, 3, 0), "width is invalid");               \
     patch_VLdSt(op, Vd, width, Rs1, lumop, vm, mop, mew, nf);                        \
   }
 
   // Vector Load/Store Instructions
-  INSN(vl1re8_v, 0b0000111, 0b01000, 0b1, 0b00, g1);
+  INSN(vl1re8_v,  0b0000111, 0b000, 0b01000, 0b1, 0b00, 0b0, g1);
+  INSN(vl1re16_v, 0b0000111, 0b101, 0b01000, 0b1, 0b00, 0b0, g1);
+  INSN(vl1re32_v, 0b0000111, 0b110, 0b01000, 0b1, 0b00, 0b0, g1);
+  INSN(vl1re64_v, 0b0000111, 0b111, 0b01000, 0b1, 0b00, 0b0, g1);
+  INSN(vl2re8_v,  0b0000111, 0b000, 0b01000, 0b1, 0b00, 0b0, g2);
+  INSN(vl2re16_v, 0b0000111, 0b101, 0b01000, 0b1, 0b00, 0b0, g2);
+  INSN(vl2re32_v, 0b0000111, 0b110, 0b01000, 0b1, 0b00, 0b0, g2);
+  INSN(vl2re64_v, 0b0000111, 0b111, 0b01000, 0b1, 0b00, 0b0, g2);
+  INSN(vl4re8_v,  0b0000111, 0b000, 0b01000, 0b1, 0b00, 0b0, g4);
+  INSN(vl4re16_v, 0b0000111, 0b101, 0b01000, 0b1, 0b00, 0b0, g4);
+  INSN(vl4re32_v, 0b0000111, 0b110, 0b01000, 0b1, 0b00, 0b0, g4);
+  INSN(vl4re64_v, 0b0000111, 0b111, 0b01000, 0b1, 0b00, 0b0, g4);
+  INSN(vl8re8_v,  0b0000111, 0b000, 0b01000, 0b1, 0b00, 0b0, g8);
+  INSN(vl8re16_v, 0b0000111, 0b101, 0b01000, 0b1, 0b00, 0b0, g8);
+  INSN(vl8re32_v, 0b0000111, 0b110, 0b01000, 0b1, 0b00, 0b0, g8);
+  INSN(vl8re64_v, 0b0000111, 0b111, 0b01000, 0b1, 0b00, 0b0, g8);
 
 #undef INSN
 
@@ -1607,6 +1638,9 @@ enum Nf {
 
   // Vector Load/Store Instructions
   INSN(vs1r_v, 0b0100111, 0b000, 0b01000, 0b1, 0b00, 0b0, g1);
+  INSN(vs2r_v, 0b0100111, 0b000, 0b01000, 0b1, 0b00, 0b0, g2);
+  INSN(vs4r_v, 0b0100111, 0b000, 0b01000, 0b1, 0b00, 0b0, g4);
+  INSN(vs8r_v, 0b0100111, 0b000, 0b01000, 0b1, 0b00, 0b0, g8);
 
 #undef INSN
 
@@ -1680,7 +1714,7 @@ enum Nf {
 
 // ====================================
 // RISC-V Bit-Manipulation Extension
-// Currently only support Zba and Zbb.
+// Currently only support Zba and Zbb bitmanip extensions.
 // ====================================
 #define INSN(NAME, op, funct3, funct7)                  \
   void NAME(Register Rd, Register Rs1, Register Rs2) {  \
@@ -2762,12 +2796,6 @@ public:
 
 #undef INSN
 
-  // RVB pseudo instructions
-  // zero extend word
-  void zext_w(Register Rd, Register Rs) {
-    add_uw(Rd, Rs, zr);
-  }
-
   // Stack overflow checking
   virtual void bang_stack_with_offset(int offset) { Unimplemented(); }
 
@@ -2783,8 +2811,6 @@ public:
   }
 
   Assembler(CodeBuffer* code) : AbstractAssembler(code), _in_compressible_region(true) {}
-
-  virtual ~Assembler() {}
 };
 
 #endif // CPU_RISCV_ASSEMBLER_RISCV_HPP

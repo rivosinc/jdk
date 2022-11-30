@@ -881,7 +881,11 @@ class StubGenerator: public StubCodeGenerator {
   //
   /*
    * if (is_aligned) {
-   *   goto copy_8_bytes;
+   *   if (count >= 32)
+   *     goto copy32_loop;
+   *   if (count >= 8)
+   *     goto copy8_loop;
+   *   goto copy_small;
    * }
    * bool is_backwards = step < 0;
    * int granularity = uabs(step);
@@ -899,9 +903,12 @@ class StubGenerator: public StubCodeGenerator {
    *
    * if ((dst % 8) == (src % 8)) {
    *   aligned;
-   *   goto copy8;
+   *   goto copy_big;
    * }
    *
+   * copy_big:
+   * if the amount to copy is more than (or equal to) 32 bytes goto copy32_loop
+   *  else goto copy8_loop
    * copy_small:
    *   load element one by one;
    * done;
@@ -962,10 +969,10 @@ class StubGenerator: public StubCodeGenerator {
     bool is_backwards = step < 0;
     int granularity = uabs(step);
 
-    const Register src = x30, dst = x31, cnt = x15, tmp3 = x16, tmp4 = x17;
+    const Register src = x30, dst = x31, cnt = x15, tmp3 = x16, tmp4 = x17, tmp5 = x14, tmp6 = x13;
 
     Label same_aligned;
-    Label copy8, copy_small, done;
+    Label copy_big, copy32_loop, copy8_loop, copy_small, done;
 
     copy_insn ld_arr = NULL, st_arr = NULL;
     switch (granularity) {
@@ -1000,36 +1007,69 @@ class StubGenerator: public StubCodeGenerator {
     }
 
     if (is_aligned) {
+      __ addi(tmp, cnt, -32);
+      __ bgez(tmp, copy32_loop);
       __ addi(tmp, cnt, -8);
-      __ bgez(tmp, copy8);
+      __ bgez(tmp, copy8_loop);
       __ j(copy_small);
+    } else {
+      __ mv(tmp, 16);
+      __ blt(cnt, tmp, copy_small);
+
+      __ xorr(tmp, src, dst);
+      __ andi(tmp, tmp, 0b111);
+      __ bnez(tmp, copy_small);
+
+      __ bind(same_aligned);
+      __ andi(tmp, src, 0b111);
+      __ beqz(tmp, copy_big);
+      if (is_backwards) {
+        __ addi(src, src, step);
+        __ addi(dst, dst, step);
+      }
+      (_masm->*ld_arr)(tmp3, Address(src), t0);
+      (_masm->*st_arr)(tmp3, Address(dst), t0);
+      if (!is_backwards) {
+        __ addi(src, src, step);
+        __ addi(dst, dst, step);
+      }
+      __ addi(cnt, cnt, -granularity);
+      __ beqz(cnt, done);
+      __ j(same_aligned);
+
+      __ bind(copy_big);
+      __ mv(tmp, 32);
+      __ blt(cnt, tmp, copy8_loop);
     }
-
-    __ mv(tmp, 16);
-    __ blt(cnt, tmp, copy_small);
-
-    __ xorr(tmp, src, dst);
-    __ andi(tmp, tmp, 0b111);
-    __ bnez(tmp, copy_small);
-
-    __ bind(same_aligned);
-    __ andi(tmp, src, 0b111);
-    __ beqz(tmp, copy8);
+    __ bind(copy32_loop);
     if (is_backwards) {
-      __ addi(src, src, step);
-      __ addi(dst, dst, step);
+      __ addi(src, src, -wordSize * 4);
+      __ addi(dst, dst, -wordSize * 4);
     }
-    (_masm->*ld_arr)(tmp3, Address(src), t0);
-    (_masm->*st_arr)(tmp3, Address(dst), t0);
-    if (!is_backwards) {
-      __ addi(src, src, step);
-      __ addi(dst, dst, step);
-    }
-    __ addi(cnt, cnt, -granularity);
-    __ beqz(cnt, done);
-    __ j(same_aligned);
+    // we first load 32 bytes, then write it, so the direction here doesn't matter
+    __ ld(tmp3, Address(src));
+    __ ld(tmp4, Address(src, 8));
+    __ ld(tmp5, Address(src, 16));
+    __ ld(tmp6, Address(src, 24));
+    __ sd(tmp3, Address(dst));
+    __ sd(tmp4, Address(dst, 8));
+    __ sd(tmp5, Address(dst, 16));
+    __ sd(tmp6, Address(dst, 24));
 
-    __ bind(copy8);
+    if (!is_backwards) {
+      __ addi(src, src, wordSize * 4);
+      __ addi(dst, dst, wordSize * 4);
+    }
+    __ addi(tmp, cnt, -(32 + wordSize * 4));
+    __ addi(cnt, cnt, -wordSize * 4);
+    __ bgez(tmp, copy32_loop); // cnt >= 32, do next loop
+
+    __ beqz(cnt, done); // if that's all - done
+
+    __ addi(tmp, cnt, -8); // if not - copy the reminder
+    __ bltz(tmp, copy_small); // cnt < 8, go to copy_small, else fall throught to copy8_loop
+
+    __ bind(copy8_loop);
     if (is_backwards) {
       __ addi(src, src, -wordSize);
       __ addi(dst, dst, -wordSize);
@@ -1040,11 +1080,11 @@ class StubGenerator: public StubCodeGenerator {
       __ addi(src, src, wordSize);
       __ addi(dst, dst, wordSize);
     }
+    __ addi(tmp, cnt, -(8 + wordSize));
     __ addi(cnt, cnt, -wordSize);
-    __ addi(tmp4, cnt, -8);
-    __ bgez(tmp4, copy8); // cnt >= 8, do next loop
+    __ bgez(tmp, copy8_loop); // cnt >= 8, do next loop
 
-    __ beqz(cnt, done);
+    __ beqz(cnt, done); // if that's all - done
 
     __ bind(copy_small);
     if (is_backwards) {
@@ -1790,7 +1830,7 @@ class StubGenerator: public StubCodeGenerator {
       __ bind(L1);
       __ stop("broken null klass");
       __ bind(L2);
-      __ load_klass(t0, dst);
+      __ load_klass(t0, dst, t1);
       __ beqz(t0, L1);     // this would be broken also
       BLOCK_COMMENT("} assert klasses not null done");
     }
@@ -3677,6 +3717,563 @@ class StubGenerator: public StubCodeGenerator {
   };
 #endif // COMPILER2
 
+
+  // Arguments:
+  //
+  // Inputs:
+  //   c_rarg0   - byte[]  source+offset
+  //   c_rarg1   - int[]   SHA.state
+  //   c_rarg2   - int     offset
+  //   c_rarg3   - int     limit
+  //
+  address generate_sha256_implCompress(bool multi_block, const char *name) {
+    static const uint32_t round_consts[64] = {
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+      0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+      0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+      0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+      0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+      0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    };
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address start = __ pc();
+
+    Register buf   = c_rarg0;
+    Register state = c_rarg1;
+    Register ofs   = c_rarg2;
+    Register limit = c_rarg3;
+
+    Label multi_block_loop;
+
+    __ enter();
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vle32_v(v16, c_rarg1);
+    __ add(c_rarg1, c_rarg1, 16);
+    __ vle32_v(v17, c_rarg1);
+
+    __ bind(multi_block_loop);
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vle32_v(v20, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 16);
+    __ vle32_v(v21, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 16);
+    __ vle32_v(v22, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 16);
+    __ vle32_v(v23, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 16);
+
+    __ vsetivli(x0, 16, Assembler::e8, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v24);
+    __ vxor_vi(v24, v24, 0x3);
+    __ vrgather_vv(v10, v20, v24);
+    __ vrgather_vv(v11, v21, v24);
+    __ vrgather_vv(v12, v22, v24);
+    __ vrgather_vv(v13, v23, v24);
+    __ vrgather_vv(v26, v16, v24);
+    __ vrgather_vv(v27, v17, v24);
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+
+    __ vid_v(v31);
+    __ vadd_vi(v30, v31, 2);
+    __ vmsltu_vi(v0, v31, 2);
+    __ vrgather_vv(v17, v26, v30, Assembler::v0_t);
+    __ vmerge_vvm(v17, v27, v17);
+    __ vadd_vi(v30, v31, -2);
+    __ vnot_v(v0, v0);
+    __ vrgather_vv(v16, v27, v30, Assembler::v0_t);
+    __ vmerge_vvm(v16, v26, v16);
+
+    __ vid_v(v0);
+    __ vmseq_vi(v0, v0, 0x0);
+
+    __ la(t0, ExternalAddress((address)round_consts));
+
+    // Quad-round 0 (+0, Wt from oldest to newest in v10->v11->v12->v13)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13); // Generate W[19:16]
+
+    // Quad-round 1 (+1, v11->v12->v13->v10)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10); // Generate W[23:20]
+
+    // Quad-round 2 (+2, v12->v13->v10->v11)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11); // Generate W[27:24]
+
+    // Quad-round 3 (+3, v13->v10->v11->v12)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12); // Generate W[31:28]
+
+    // Quad-round 4 (+0, v10->v11->v12->v13)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13); // Generate W[35:32]
+
+    // Quad-round 5 (+1, v11->v12->v13->v10)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10); // Generate W[39:36]
+
+    // Quad-round 6 (+2, v12->v13->v10->v11)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11); // Generate W[43:40]
+
+    // Quad-round 7 (+3, v13->v10->v11->v12)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12); // Generate W[47:44]
+
+    // Quad-round 8 (+0, v10->v11->v12->v13)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13); // Generate W[51:48]
+
+    // Quad-round 9 (+1, v11->v12->v13->v10)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10); // Generate W[55:52]
+
+    // Quad-round 10 (+2, v12->v13->v10->v11)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11); // Generate W[59:56]
+
+    // Quad-round 11 (+3, v13->v10->v11->v12)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12); // Generate W[63:60]
+
+    // Quad-round 12 (+0, v10->v11->v12->v13)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+
+    // Quad-round 13 (+1, v11->v12->v13->v10)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+
+    // Quad-round 14 (+2, v12->v13->v10->v11)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+
+    // Quad-round 15 (+3, v13->v10->v11->v12)
+    __ vl1re32_v(v15, t0);
+    __ add(t0, t0, 16);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+
+    __ vid_v(v31);
+
+    __ vadd_vi(v30, v31, 2);
+    __ vmsltu_vi(v0, v31, 2);
+    __ vrgather_vv(v19, v16, v30, Assembler::v0_t);
+    __ vmerge_vvm(v19, v17, v19);
+    __ vadd_vi(v30, v31, -2);
+    __ vnot_v(v0, v0);
+    __ vrgather_vv(v18, v17, v30, Assembler::v0_t);
+    __ vmerge_vvm(v18, v16, v18);
+
+    __ vadd_vv(v18, v26, v18);
+    __ vadd_vv(v19, v27, v19);
+
+    __ vsetivli(x0, 16, Assembler::e8, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v24);
+    __ vxor_vi(v24, v24, 0x3);
+
+    __ vrgather_vv(v16, v18, v24);
+    __ vrgather_vv(v17, v19, v24);
+
+    if (multi_block) {
+      __ add(ofs, ofs, 64);
+      __ ble(ofs, limit, multi_block_loop);
+      __ mv(c_rarg0, ofs); // return ofs
+    }
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vle32_v(v17, c_rarg1);
+    __ add(c_rarg1, c_rarg1, -16);
+    __ vle32_v(v16, c_rarg1);
+
+    __ leave();
+    __ ret();
+
+    return start;
+  }
+
+  // Arguments:
+  //
+  // Inputs:
+  //   c_rarg0   - byte[]  source+offset
+  //   c_rarg1   - int[]   SHA.state
+  //   c_rarg2   - int     offset
+  //   c_rarg3   - int     limit
+  //
+  address generate_sha512_implCompress(bool multi_block, const char *name) {
+    static const uint64_t round_consts[80] = {
+      0x428a2f98d728ae22l, 0x7137449123ef65cdl, 0xb5c0fbcfec4d3b2fl,
+      0xe9b5dba58189dbbcl, 0x3956c25bf348b538l, 0x59f111f1b605d019l,
+      0x923f82a4af194f9bl, 0xab1c5ed5da6d8118l, 0xd807aa98a3030242l,
+      0x12835b0145706fbel, 0x243185be4ee4b28cl, 0x550c7dc3d5ffb4e2l,
+      0x72be5d74f27b896fl, 0x80deb1fe3b1696b1l, 0x9bdc06a725c71235l,
+      0xc19bf174cf692694l, 0xe49b69c19ef14ad2l, 0xefbe4786384f25e3l,
+      0x0fc19dc68b8cd5b5l, 0x240ca1cc77ac9c65l, 0x2de92c6f592b0275l,
+      0x4a7484aa6ea6e483l, 0x5cb0a9dcbd41fbd4l, 0x76f988da831153b5l,
+      0x983e5152ee66dfabl, 0xa831c66d2db43210l, 0xb00327c898fb213fl,
+      0xbf597fc7beef0ee4l, 0xc6e00bf33da88fc2l, 0xd5a79147930aa725l,
+      0x06ca6351e003826fl, 0x142929670a0e6e70l, 0x27b70a8546d22ffcl,
+      0x2e1b21385c26c926l, 0x4d2c6dfc5ac42aedl, 0x53380d139d95b3dfl,
+      0x650a73548baf63del, 0x766a0abb3c77b2a8l, 0x81c2c92e47edaee6l,
+      0x92722c851482353bl, 0xa2bfe8a14cf10364l, 0xa81a664bbc423001l,
+      0xc24b8b70d0f89791l, 0xc76c51a30654be30l, 0xd192e819d6ef5218l,
+      0xd69906245565a910l, 0xf40e35855771202al, 0x106aa07032bbd1b8l,
+      0x19a4c116b8d2d0c8l, 0x1e376c085141ab53l, 0x2748774cdf8eeb99l,
+      0x34b0bcb5e19b48a8l, 0x391c0cb3c5c95a63l, 0x4ed8aa4ae3418acbl,
+      0x5b9cca4f7763e373l, 0x682e6ff3d6b2b8a3l, 0x748f82ee5defb2fcl,
+      0x78a5636f43172f60l, 0x84c87814a1f0ab72l, 0x8cc702081a6439ecl,
+      0x90befffa23631e28l, 0xa4506cebde82bde9l, 0xbef9a3f7b2c67915l,
+      0xc67178f2e372532bl, 0xca273eceea26619cl, 0xd186b8c721c0c207l,
+      0xeada7dd6cde0eb1el, 0xf57d4f7fee6ed178l, 0x06f067aa72176fbal,
+      0x0a637dc5a2c898a6l, 0x113f9804bef90dael, 0x1b710b35131c471bl,
+      0x28db77f523047d84l, 0x32caab7b40c72493l, 0x3c9ebe0a15c9bebcl,
+      0x431d67c49c100d4cl, 0x4cc5d4becb3e42b6l, 0x597f299cfc657e2al,
+      0x5fcb6fab3ad6faecl, 0x6c44198c4a475817l
+    };
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address start = __ pc();
+
+    Register buf   = c_rarg0;
+    Register state = c_rarg1;
+    Register ofs   = c_rarg2;
+    Register limit = c_rarg3;
+
+    Label multi_block_loop;
+
+    __ enter();
+
+    __ vsetivli(x0, 4, Assembler::e64, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vle64_v(v16, c_rarg1);
+    __ addi(c_rarg1, c_rarg1, 32);
+    __ vle64_v(v17, c_rarg1);
+
+    __ bind(multi_block_loop);
+
+    __ vsetivli(x0, 4, Assembler::e64, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vle64_v(v20, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 32);
+    __ vle64_v(v21, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 32);
+    __ vle64_v(v22, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 32);
+    __ vle64_v(v23, c_rarg0);
+    __ add(c_rarg0, c_rarg0, 32);
+
+    __ li(t0, 32);
+    __ vsetvli(x0, t0, Assembler::e8, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v24);
+    __ vxor_vi(v24, v24, 0x7);
+    __ vrgather_vv(v26, v16, v24);
+    __ vrgather_vv(v27, v17, v24);
+
+    __ vsetivli(x0, 4, Assembler::e64, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v31);
+    __ vadd_vi(v30, v31, 2);
+    __ vmsltu_vi(v0, v31, 2);
+    __ vrgather_vv(v17, v26, v30, Assembler::v0_t);
+    __ vmerge_vvm(v17, v27, v17);
+    __ vadd_vi(v30, v31, -2);
+    __ vnot_v(v0, v0);
+    __ vrgather_vv(v16, v27, v30, Assembler::v0_t);
+    __ vmerge_vvm(v16, v26, v16);
+
+    __ li(t0, 32);
+    __ vsetvli(x0, t0, Assembler::e8, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v24);
+    __ vxor_vi(v24, v24, 0x7);
+    __ vrgather_vv(v10, v20, v24);
+    __ vrgather_vv(v11, v21, v24);
+    __ vrgather_vv(v12, v22, v24);
+    __ vrgather_vv(v13, v23, v24);
+
+    __ vsetivli(x0, 4, Assembler::e64, Assembler::m1, Assembler::ma, Assembler::ta);
+
+    __ vid_v(v0);
+    __ vmseq_vi(v0, v0, 0x0);
+
+    __ la(t0, ExternalAddress((address)round_consts));
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v11, v10);
+    __ vsha2ms_vv(v13, v14, v12);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v10);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v12, v11);
+    __ vsha2ms_vv(v10, v14, v13);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v11);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v13, v12);
+    __ vsha2ms_vv(v11, v14, v10);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v12);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+    __ vmerge_vvm(v14, v10, v13);
+    __ vsha2ms_vv(v12, v14, v11);
+
+    __ vl1re64_v(v15, t0);
+    __ addi(t0, t0, 32);
+    __ vadd_vv(v14, v15, v13);
+    __ vsha2cl_vv(v17, v16, v14);
+    __ vsha2ch_vv(v16, v17, v14);
+
+    __ vid_v(v31);
+
+    __ vadd_vi(v30, v31, 2);
+    __ vmsltu_vi(v0, v31, 2);
+    __ vrgather_vv(v19, v16, v30, Assembler::v0_t);
+    __ vmerge_vvm(v19, v17, v19);
+    __ vadd_vi(v30, v31, -2);
+    __ vnot_v(v0, v0);
+    __ vrgather_vv(v18, v17, v30, Assembler::v0_t);
+    __ vmerge_vvm(v18, v16, v18);
+
+    __ vadd_vv(v18, v26, v18);
+    __ vadd_vv(v19, v27, v19);
+
+    __ li(t0, 32);
+    __ vsetvli(x0, t0, Assembler::e8, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vid_v(v24);
+    __ vxor_vi(v24, v24, 0x7);
+    __ vrgather_vv(v16, v18, v24);
+    __ vrgather_vv(v17, v19, v24);
+
+    if (multi_block) {
+      __ add(ofs, ofs, 128);
+      __ ble(ofs, limit, multi_block_loop);
+      __ mv(c_rarg0, ofs); // return ofs
+    }
+
+    __ vsetivli(x0, 4, Assembler::e64, Assembler::m1, Assembler::ma, Assembler::ta);
+    __ vse64_v(v17, c_rarg1);
+    __ addi(c_rarg1, c_rarg1, -32);
+    __ vse64_v(v16, c_rarg1);
+
+    __ leave();
+    __ ret();
+
+    return start;
+  }
+
   // Continuation point for throwing of implicit exceptions that are
   // not handled in the current activation. Fabricates an exception
   // oop and initiates normal exception dispatching in this
@@ -4085,6 +4682,15 @@ class StubGenerator: public StubCodeGenerator {
       StubRoutines::_bigIntegerRightShiftWorker = generate_bigIntegerRightShift();
     }
 #endif
+
+    if (UseSHA256Intrinsics) {
+      StubRoutines::_sha256_implCompress   = generate_sha256_implCompress(false, "sha256_implCompress");
+      StubRoutines::_sha256_implCompressMB = generate_sha256_implCompress(true,  "sha256_implCompressMB");
+    }
+    if (UseSHA512Intrinsics) {
+      StubRoutines::_sha512_implCompress   = generate_sha512_implCompress(false, "sha512_implCompress");
+      StubRoutines::_sha512_implCompressMB = generate_sha512_implCompress(true,  "sha512_implCompressMB");
+    }
 
     generate_compare_long_strings();
 

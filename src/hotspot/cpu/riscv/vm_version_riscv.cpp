@@ -114,12 +114,20 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA1Intrinsics, false);
   }
 
-  if (UseSHA256Intrinsics) {
+  if (UseZvknha) {
+    if (FLAG_IS_DEFAULT(UseSHA256Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA256Intrinsics, true);
+    }
+  } else if (UseSHA256Intrinsics) {
     warning("Intrinsics for SHA-224 and SHA-256 crypto hash functions not available on this CPU.");
     FLAG_SET_DEFAULT(UseSHA256Intrinsics, false);
   }
 
-  if (UseSHA512Intrinsics) {
+  if (UseZvknhb) {
+    if (FLAG_IS_DEFAULT(UseSHA512Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA512Intrinsics, true);
+    }
+  } else if (UseSHA512Intrinsics) {
     warning("Intrinsics for SHA-384 and SHA-512 crypto hash functions not available on this CPU.");
     FLAG_SET_DEFAULT(UseSHA512Intrinsics, false);
   }
@@ -157,6 +165,11 @@ void VM_Version::initialize() {
   if (UseRVC && !(_features & CPU_C)) {
     warning("RVC is not supported on this CPU");
     FLAG_SET_DEFAULT(UseRVC, false);
+
+    if (UseRVA20U64) {
+      warning("UseRVA20U64 is not supported on this CPU");
+      FLAG_SET_DEFAULT(UseRVA20U64, false);
+    }
   }
 
   if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
