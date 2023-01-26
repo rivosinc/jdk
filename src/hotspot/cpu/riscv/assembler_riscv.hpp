@@ -1837,6 +1837,24 @@ enum Nf {
 
 #undef INSN
 
+#define INSN(NAME, op, funct3, Vs1, vm, funct6)                              \
+  void NAME(VectorRegister Vd, VectorRegister Vs2) {                         \
+    patch_VArith(op, Vd, funct3, Vs1, Vs2, vm, funct6);                      \
+  }
+
+  // Vector AES Block Cipher (Zvkns) Extension
+  INSN(vaesz_vs,  0b1110111, 0b010, 0b00111, 0b1, 0b101001);
+  INSN(vaesdm_vs, 0b1110111, 0b010, 0b00000, 0b1, 0b101001);
+  INSN(vaesdm_vv, 0b1110111, 0b010, 0b00000, 0b1, 0b101000);
+  INSN(vaesdf_vs, 0b1110111, 0b010, 0b00001, 0b1, 0b101001);
+  INSN(vaesdf_vv, 0b1110111, 0b010, 0b00001, 0b1, 0b101000);
+  INSN(vaesem_vs, 0b1110111, 0b010, 0b00010, 0b1, 0b101001);
+  INSN(vaesem_vv, 0b1110111, 0b010, 0b00010, 0b1, 0b101000);
+  INSN(vaesef_vs, 0b1110111, 0b010, 0b00011, 0b1, 0b101001);
+  INSN(vaesef_vv, 0b1110111, 0b010, 0b00011, 0b1, 0b101000);
+
+#undef INSN
+
 #undef patch_VArith
 
 // ====================================

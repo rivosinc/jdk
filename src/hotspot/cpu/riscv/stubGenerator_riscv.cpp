@@ -4624,6 +4624,275 @@ class StubGenerator: public StubCodeGenerator {
     return start;
   }
 
+  // Arguments:
+  //
+  // Inputs:
+  //   c_rarg0   - source byte array address
+  //   c_rarg1   - destination byte array address
+  //   c_rarg2   - K (key) in little endian int array
+  //
+  address generate_aescrypt_encryptBlock() {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "aescrypt_encryptBlock");
+    address start = __ pc();
+
+    const Register from        = c_rarg0;  // source array address
+    const Register to          = c_rarg1;  // destination array address
+    const Register key         = c_rarg2;  // key array address
+    const Register keylen      = t0;
+
+    Label loadkey_44, loadkey_52, round_44, round_52, round_common;
+
+    __ enter();
+
+    __ lw(keylen, Address(key, arrayOopDesc::length_offset_in_bytes() - arrayOopDesc::base_offset_in_bytes(T_INT)));
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+
+    // Load expanded round key
+    __ li(t1, 52);
+    __ blt(keylen, t1, loadkey_44);
+    __ beq(keylen, t1, loadkey_52);
+    // 256 bits key
+    __ vle32_v(v10, key);
+    __ vrev8_v(v10, v10);
+    __ add(key, key, 16);
+    __ vle32_v(v11, key);
+    __ vrev8_v(v11, v11);
+    __ add(key, key, 16);
+    // 192 bits key
+    __ bind(loadkey_52);
+    __ vle32_v(v12, key);
+    __ vrev8_v(v12, v12);
+    __ add(key, key, 16);
+    __ vle32_v(v13, key);
+    __ vrev8_v(v13, v13);
+    __ add(key, key, 16);
+    // 128 bits key
+    __ bind(loadkey_44);
+    __ vle32_v(v14, key);
+    __ vrev8_v(v14, v14);
+    __ add(key, key, 16);
+    __ vle32_v(v15, key);
+    __ vrev8_v(v15, v15);
+    __ add(key, key, 16);
+    __ vle32_v(v16, key);
+    __ vrev8_v(v16, v16);
+    __ add(key, key, 16);
+    __ vle32_v(v17, key);
+    __ vrev8_v(v17, v17);
+    __ add(key, key, 16);
+    __ vle32_v(v18, key);
+    __ vrev8_v(v18, v18);
+    __ add(key, key, 16);
+    __ vle32_v(v19, key);
+    __ vrev8_v(v19, v19);
+    __ add(key, key, 16);
+    __ vle32_v(v20, key);
+    __ vrev8_v(v20, v20);
+    __ add(key, key, 16);
+    __ vle32_v(v21, key);
+    __ vrev8_v(v21, v21);
+    __ add(key, key, 16);
+    __ vle32_v(v22, key);
+    __ vrev8_v(v22, v22);
+    __ add(key, key, 16);
+    __ vle32_v(v23, key);
+    __ vrev8_v(v23, v23);
+    __ add(key, key, 16);
+    __ vle32_v(v24, key);
+    __ vrev8_v(v24, v24);
+    // no need to increment key
+
+    // Load 16 bytes from source array
+    __ vle32_v(v1, from);
+
+    // Encrypt block with expanded round key
+    __ li(t1, 52);
+    __ blt(keylen, t1, round_44);
+    __ beq(keylen, t1, round_52);
+    // 256 bits key
+    __ vaesz_vs(v1, v10);
+    __ vaesem_vs(v1, v11);
+    __ vaesem_vs(v1, v12);
+    __ vaesem_vs(v1, v13);
+    __ vaesem_vs(v1, v14);
+    __ j(round_common);
+    // 192 bits key
+    __ bind(round_52);
+    __ vaesz_vs(v1, v12);
+    __ vaesem_vs(v1, v13);
+    __ vaesem_vs(v1, v14);
+    __ j(round_common);
+    // 128 bits key
+    __ bind(round_44);
+    __ vaesz_vs(v1, v14);
+    __ bind(round_common);
+    __ vaesem_vs(v1, v15);
+    __ vaesem_vs(v1, v16);
+    __ vaesem_vs(v1, v17);
+    __ vaesem_vs(v1, v18);
+    __ vaesem_vs(v1, v19);
+    __ vaesem_vs(v1, v20);
+    __ vaesem_vs(v1, v21);
+    __ vaesem_vs(v1, v22);
+    __ vaesem_vs(v1, v23);
+    __ vaesef_vs(v1, v24);
+
+    // Store 16 bytes to dest address
+    __ vse32_v(v1, to);
+
+    __ leave();
+    __ ret();
+
+    return start;
+  }
+
+  // Arguments:
+  //
+  // Inputs:
+  //   c_rarg0   - source byte array address
+  //   c_rarg1   - destination byte array address
+  //   c_rarg2   - K (key) in little endian int array
+  //
+  address generate_aescrypt_decryptBlock() {
+    assert(UseAES, "need AES cryptographic extension support");
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "aescrypt_decryptBlock");
+    address start = __ pc();
+
+    const Register from        = c_rarg0;  // source array address
+    const Register to          = c_rarg1;  // destination array address
+    const Register key         = c_rarg2;  // key array address
+    const Register keylen      = t0;
+
+    Label loadkey_44, loadkey_52, round_44, round_52, round_end;
+
+    __ enter(); // required for proper stackwalking of RuntimeStub frame
+
+    __ lw(keylen, Address(key, arrayOopDesc::length_offset_in_bytes() - arrayOopDesc::base_offset_in_bytes(T_INT)));
+
+    __ vsetivli(x0, 4, Assembler::e32, Assembler::m1, Assembler::ma, Assembler::ta);
+
+    // Load expanded round key
+    __ li(t1, 52);
+    __ blt(keylen, t1, loadkey_44);
+    __ beq(keylen, t1, loadkey_52);
+    // 256 bits key
+    __ vle32_v(v10, key);
+    __ vrev8_v(v10, v10);
+    __ add(key, key, 16);
+    __ vle32_v(v11, key);
+    __ vrev8_v(v11, v11);
+    __ add(key, key, 16);
+    // 192 bits key
+    __ bind(loadkey_52);
+    __ vle32_v(v12, key);
+    __ vrev8_v(v12, v12);
+    __ add(key, key, 16);
+    __ vle32_v(v13, key);
+    __ vrev8_v(v13, v13);
+    __ add(key, key, 16);
+    // 128 bits key
+    __ bind(loadkey_44);
+    __ vle32_v(v14, key);
+    __ vrev8_v(v14, v14);
+    __ add(key, key, 16);
+    __ vle32_v(v15, key);
+    __ vrev8_v(v15, v15);
+    __ add(key, key, 16);
+    __ vle32_v(v16, key);
+    __ vrev8_v(v16, v16);
+    __ add(key, key, 16);
+    __ vle32_v(v17, key);
+    __ vrev8_v(v17, v17);
+    __ add(key, key, 16);
+    __ vle32_v(v18, key);
+    __ vrev8_v(v18, v18);
+    __ add(key, key, 16);
+    __ vle32_v(v19, key);
+    __ vrev8_v(v19, v19);
+    __ add(key, key, 16);
+    __ vle32_v(v20, key);
+    __ vrev8_v(v20, v20);
+    __ add(key, key, 16);
+    __ vle32_v(v21, key);
+    __ vrev8_v(v21, v21);
+    __ add(key, key, 16);
+    __ vle32_v(v22, key);
+    __ vrev8_v(v22, v22);
+    __ add(key, key, 16);
+    __ vle32_v(v23, key);
+    __ vrev8_v(v23, v23);
+    __ add(key, key, 16);
+    __ vle32_v(v24, key);
+    __ vrev8_v(v24, v24);
+    // no need to increment key
+
+    // Load 16 bytes from source array
+    __ vle32_v(v1, from);
+
+    // Decrypt block with expanded round key
+    __ li(t1, 52);
+    __ blt(keylen, t1, round_44);
+    __ beq(keylen, t1, round_52);
+    // 256 bits key
+    __ vaesz_vs(v1, v24);
+    __ vaesdm_vs(v1, v23);
+    __ vaesdm_vs(v1, v22);
+    __ vaesdm_vs(v1, v21);
+    __ vaesdm_vs(v1, v20);
+    __ vaesdm_vs(v1, v19);
+    __ vaesdm_vs(v1, v18);
+    __ vaesdm_vs(v1, v17);
+    __ vaesdm_vs(v1, v16);
+    __ vaesdm_vs(v1, v15);
+    __ vaesdm_vs(v1, v14);
+    __ vaesdm_vs(v1, v13);
+    __ vaesdm_vs(v1, v12);
+    __ vaesdm_vs(v1, v11);
+    __ vaesdf_vs(v1, v10);
+    __ j(round_end);
+    // 192 bits key
+    __ bind(round_52);
+    __ vaesz_vs(v1, v24);
+    __ vaesdm_vs(v1, v23);
+    __ vaesdm_vs(v1, v22);
+    __ vaesdm_vs(v1, v21);
+    __ vaesdm_vs(v1, v20);
+    __ vaesdm_vs(v1, v19);
+    __ vaesdm_vs(v1, v18);
+    __ vaesdm_vs(v1, v17);
+    __ vaesdm_vs(v1, v16);
+    __ vaesdm_vs(v1, v15);
+    __ vaesdm_vs(v1, v14);
+    __ vaesdm_vs(v1, v13);
+    __ vaesdf_vs(v1, v12);
+    __ j(round_end);
+    // 128 bits key
+    __ bind(round_44);
+    __ vaesz_vs(v1, v24);
+    __ vaesdm_vs(v1, v23);
+    __ vaesdm_vs(v1, v22);
+    __ vaesdm_vs(v1, v21);
+    __ vaesdm_vs(v1, v20);
+    __ vaesdm_vs(v1, v19);
+    __ vaesdm_vs(v1, v18);
+    __ vaesdm_vs(v1, v17);
+    __ vaesdm_vs(v1, v16);
+    __ vaesdm_vs(v1, v15);
+    __ vaesdf_vs(v1, v14);
+    __ bind(round_end);
+
+    // Store 16 bytes to dest address
+    __ vse32_v(v1, to);
+
+    __ leave();
+    __ ret();
+
+    return start;
+  }
+
   // Continuation point for throwing of implicit exceptions that are
   // not handled in the current activation. Fabricates an exception
   // oop and initiates normal exception dispatching in this
@@ -5027,6 +5296,11 @@ class StubGenerator: public StubCodeGenerator {
       StubRoutines::_bigIntegerRightShiftWorker = generate_bigIntegerRightShift();
     }
 #endif
+
+    if (UseAESIntrinsics) {
+      StubRoutines::_aescrypt_encryptBlock = generate_aescrypt_encryptBlock();
+      StubRoutines::_aescrypt_decryptBlock = generate_aescrypt_decryptBlock();
+    }
 
     if (UseSHA256Intrinsics) {
       StubRoutines::_sha256_implCompress   = generate_sha256_implCompress(false, "sha256_implCompress");

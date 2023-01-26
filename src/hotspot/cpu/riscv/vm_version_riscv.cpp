@@ -100,12 +100,20 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(AllocatePrefetchDistance, 0);
   }
 
-  if (UseAES || UseAESIntrinsics) {
-    if (UseAES && !FLAG_IS_DEFAULT(UseAES)) {
+
+  if (UseZvkns) {
+    if (FLAG_IS_DEFAULT(UseAES)) {
+      FLAG_SET_DEFAULT(UseAES, true);
+    }
+    if (FLAG_IS_DEFAULT(UseAESIntrinsics)) {
+      FLAG_SET_DEFAULT(UseAESIntrinsics, true);
+    }
+  } else {
+    if (UseAES) {
       warning("AES instructions are not available on this CPU");
       FLAG_SET_DEFAULT(UseAES, false);
     }
-    if (UseAESIntrinsics && !FLAG_IS_DEFAULT(UseAESIntrinsics)) {
+    if (UseAESIntrinsics) {
       warning("AES intrinsics are not available on this CPU");
       FLAG_SET_DEFAULT(UseAESIntrinsics, false);
     }
