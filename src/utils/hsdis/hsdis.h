@@ -72,10 +72,38 @@
 #ifndef SHARED_TOOLS_HSDIS_H
 #define SHARED_TOOLS_HSDIS_H
 
+#include <stdarg.h>
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+// match src/hotspot/share/compiler/disassembler.cpp
+enum disassembler_style {
+  hsdis_style_text,
+  hsdis_style_mnemonic,
+  hsdis_style_assembler_directive,
+  hsdis_style_register,
+  hsdis_style_immediate,
+  hsdis_style_address,
+  hsdis_style_address_offset,
+  hsdis_style_symbol,
+  hsdis_style_comment_start,
+};
+
+extern
+#ifdef _WIN32
+__declspec(dllexport)
+#endif
+void* decode_instructions_virtual_v2(uintptr_t start_va, uintptr_t end_va,
+                                     unsigned char* buffer, uintptr_t length,
+                                     void* (*event_callback)(void*, const char*, void*),
+                                     void* event_stream,
+                                     int (*printf_styled_callback)(void*, enum disassembler_style, const char*, va_list),
+                                     void* printf_stream,
+                                     const char* options,
+                                     int newline /* bool value for nice new line */);
 
 extern
 #ifdef _WIN32
@@ -106,6 +134,15 @@ void* decode_instructions(void* start_pv, void* end_pv,
 
 typedef void* (*decode_instructions_event_callback_ftype)  (void*, const char*, void*);
 typedef int   (*decode_instructions_printf_callback_ftype) (void*, const char*, ...);
+typedef int   (*decode_instructions_printf_styled_callback_ftype) (void*, enum disassembler_style, const char*, va_list);
+typedef void* (*decode_func_vtype2) (uintptr_t start_va, uintptr_t end_va,
+                                     unsigned char* buffer, uintptr_t length,
+                                     decode_instructions_event_callback_ftype event_callback,
+                                     void* event_stream,
+                                     decode_instructions_printf_styled_callback_ftype printf_callback,
+                                     void* printf_stream,
+                                     const char* options,
+                                     int newline);
 typedef void* (*decode_func_vtype) (uintptr_t start_va, uintptr_t end_va,
                                     unsigned char* buffer, uintptr_t length,
                                     decode_instructions_event_callback_ftype event_callback,

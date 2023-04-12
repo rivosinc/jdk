@@ -58,7 +58,7 @@
 
 /* short names for stuff in hsdis.h */
 typedef decode_instructions_event_callback_ftype  event_callback_t;
-typedef decode_instructions_printf_callback_ftype printf_callback_t;
+typedef decode_instructions_printf_styled_callback_ftype printf_styled_callback_t;
 
 #define print(...) (*printf_callback) (printf_stream, __VA_ARGS__)
 
@@ -88,7 +88,7 @@ typedef struct {
   bool intel_syntax;
 } Options;
 
-static Options parse_options(const char* options, printf_callback_t printf_callback, void* printf_stream) {
+static Options parse_options(const char* options, printf_styled_callback_t printf_callback, void* printf_stream) {
   Options ops;
   // initialize with defaults
   ops.intel_syntax = false;
@@ -106,12 +106,17 @@ static Options parse_options(const char* options, printf_callback_t printf_callb
       if (end == NULL) {
         end = strchr(cursor, '\0');
       }
-      print("Unknown PrintAssembly option: %.*s\n", (int) (end - cursor), cursor);
+      print(hsdis_style_text, "Unknown PrintAssembly option: %.*s\n", (int) (end - cursor), cursor);
       cursor = end;
     }
   }
 
   return ops;
+}
+
+static int default_printf_callback(void* stream, enum disassembler_style style, const char* format, va_list ap) {
+  (void)style;
+  return vfprintf((FILE*)stream, format, ap);
 }
 
 #ifdef _WIN32
@@ -121,18 +126,16 @@ void* decode_instructions_virtual(uintptr_t start_va, uintptr_t end_va,
                                   unsigned char* buffer, uintptr_t length,
                                   event_callback_t event_callback,
                                   void* event_stream,
-                                  printf_callback_t printf_callback,
+                                  printf_styled_callback_t printf_callback,
                                   void* printf_stream,
                                   const char* options,
                                   int newline /* bool value for nice new line */) {
   csh cs_handle;
 
   if (printf_callback == NULL) {
-    int (*fprintf_callback)(FILE*, const char*, ...) = &fprintf;
-    FILE* fprintf_stream = stdout;
-    printf_callback = (printf_callback_t) fprintf_callback;
+    printf_callback = (printf_styled_callback_t)&default_printf_callback;
     if (printf_stream == NULL)
-      printf_stream   = (void*)           fprintf_stream;
+      printf_stream   = (void*)stdout;
   }
   if (event_callback == NULL) {
     if (event_stream == NULL)
@@ -143,7 +146,7 @@ void* decode_instructions_virtual(uintptr_t start_va, uintptr_t end_va,
 
 
   if (cs_open(CAPSTONE_ARCH, CAPSTONE_MODE, &cs_handle) != CS_ERR_OK) {
-    print("Could not open cs_handle");
+    print(hsdis_style_text, "Could not open cs_handle");
     return NULL;
   }
 
@@ -155,11 +158,11 @@ void* decode_instructions_virtual(uintptr_t start_va, uintptr_t end_va,
   if (count) {
     for (unsigned int j = 0; j < count; j++) {
       (*event_callback)(event_stream, "insn", (void*) insn[j].address);
-      print("%s\t\t%s", insn[j].mnemonic, insn[j].op_str);
+      print(hsdis_style_mnemonic, "%s\t\t%s", insn[j].mnemonic, insn[j].op_str);
       (*event_callback)(event_stream, "/insn", (void*) (insn[j].address + insn[j].size));
       if (newline) {
         /* follow each complete insn by a nice newline */
-        print("\n");
+        print(hsdis_style_text, "\n");
       }
     }
     cs_free(insn, count);

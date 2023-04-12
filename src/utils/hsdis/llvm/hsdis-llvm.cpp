@@ -64,7 +64,7 @@
 
 /* short names for stuff in hsdis.h */
 typedef decode_instructions_event_callback_ftype  event_callback_t;
-typedef decode_instructions_printf_callback_ftype printf_callback_t;
+typedef decode_instructions_printf_styled_callback_ftype printf_styled_callback_t;
 
 class hsdis_backend_base {
  protected:
@@ -74,7 +74,7 @@ class hsdis_backend_base {
   uintptr_t         _length;
   event_callback_t  _event_callback;
   void*             _event_stream;
-  printf_callback_t _printf_callback;
+  printf_styled_callback_t _printf_callback;
   void*             _printf_stream;
   int               _do_newline;
 
@@ -119,11 +119,16 @@ class hsdis_backend_base {
     return NULL;
   }
 
+  static int default_printf_callback(void* stream, enum disassembler_style style, const char* format, va_list ap) {
+    (void)style;
+    return vfprintf((FILE*)stream, format, ap);
+  }
+
 protected:
   hsdis_backend_base(uintptr_t start_va, uintptr_t end_va,
                      unsigned char* buffer, uintptr_t length,
                      event_callback_t  event_callback,  void* event_stream,
-                     printf_callback_t printf_callback, void* printf_stream,
+                     printf_styled_callback_t printf_callback, void* printf_stream,
                      int do_newline) :
       _start_va(start_va), _end_va(end_va),
       _buffer(buffer), _length(length),
@@ -137,11 +142,9 @@ protected:
       Events are rendered as XML.
     */
     if (_printf_callback == NULL) {
-      int (*fprintf_callback)(FILE*, const char*, ...) = &fprintf;
-      FILE* fprintf_stream = stdout;
-      _printf_callback = (printf_callback_t) fprintf_callback;
+      _printf_callback = (printf_styled_callback_t)&default_printf_callback;
       if (_printf_stream == NULL)
-        _printf_stream   = (void*)           fprintf_stream;
+        _printf_stream   = (void*)stdout;
     }
     if (_event_callback == NULL) {
       if (_event_stream == NULL)
@@ -221,7 +224,7 @@ class hsdis_backend : public hsdis_backend_base {
   hsdis_backend(uintptr_t start_va, uintptr_t end_va,
                 unsigned char* buffer, uintptr_t length,
                 event_callback_t  event_callback,  void* event_stream,
-                printf_callback_t printf_callback, void* printf_stream,
+                printf_styled_callback_t printf_callback, void* printf_stream,
                 const char* options, int newline)
     : hsdis_backend_base(start_va, end_va,
                          buffer, length,
@@ -328,6 +331,20 @@ class hsdis_backend : public hsdis_backend_base {
 };
 
 
+void* decode_instructions_virtual_v2(uintptr_t start_va, uintptr_t end_va,
+                            unsigned char* buffer, uintptr_t length,
+                            event_callback_t  event_callback_arg,  void* event_stream_arg,
+                            printf_callback_t printf_callback_arg, void* printf_stream_arg,
+                            const char* options, int newline) {
+  return hsdis_backend(start_va, end_va,
+                       buffer, length,
+                       event_callback_arg, event_stream_arg,
+                       printf_callback_arg, printf_stream_arg,
+                       options, newline == 0 ? false : true)
+          .decode();
+}
+
+/* These are the compatibility interfaces for older versions of hotspot */
 void* decode_instructions_virtual(uintptr_t start_va, uintptr_t end_va,
                             unsigned char* buffer, uintptr_t length,
                             event_callback_t  event_callback_arg,  void* event_stream_arg,
@@ -341,7 +358,6 @@ void* decode_instructions_virtual(uintptr_t start_va, uintptr_t end_va,
           .decode();
 }
 
-/* This is the compatability interface for older version of hotspot */
 void* decode_instructions(void* start_pv, void* end_pv,
                     event_callback_t  event_callback_arg,  void* event_stream_arg,
                     printf_callback_t printf_callback_arg, void* printf_stream_arg,

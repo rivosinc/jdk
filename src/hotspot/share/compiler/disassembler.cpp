@@ -46,11 +46,24 @@ void*       Disassembler::_library               = NULL;
 bool        Disassembler::_tried_to_load_library = false;
 bool        Disassembler::_library_usable        = false;
 
+// match src/utils/hsdis.h
+enum disassembler_style {
+  hsdis_style_text,
+  hsdis_style_mnemonic,
+  hsdis_style_assembler_directive,
+  hsdis_style_register,
+  hsdis_style_immediate,
+  hsdis_style_address,
+  hsdis_style_address_offset,
+  hsdis_style_symbol,
+  hsdis_style_comment_start,
+};
+
 // This routine is in the shared library:
 Disassembler::decode_func_virtual Disassembler::_decode_instructions_virtual = NULL;
 
 static const char hsdis_library_name[] = "hsdis-" HOTSPOT_LIB_ARCH;
-static const char decode_instructions_virtual_name[] = "decode_instructions_virtual";
+static const char decode_instructions_virtual_name[] = "decode_instructions_virtual_v2";
 #define COMMENT_COLUMN  52 LP64_ONLY(+8) /*could be an option*/
 #define BYTES_COMMENT   ";..."  /* funky byte display comment */
 
@@ -666,8 +679,14 @@ void decode_env::print_insn_prefix() {
   AbstractDisassembler::print_instruction(p, Assembler::instr_len(p), Assembler::instr_maxlen(), st, true, false);
 }
 
-ATTRIBUTE_PRINTF(2, 3)
 static int printf_to_env(void* env_pv, const char* format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  vprintf_to_env(env_pv, dis_style_text, format, ap);
+  va_end(ap);
+}
+
+static int vprintf_to_env(void* env_pv, enum disassembler_style, const char* format, va_list ap) {
   decode_env* env = (decode_env*) env_pv;
   outputStream* st = env->output();
   size_t flen = strlen(format);
@@ -687,12 +706,9 @@ static int printf_to_env(void* env_pv, const char* format, ...) {
     st->print_raw(raw, flen);
     return (int) flen;
   }
-  va_list ap;
-  va_start(ap, format);
   julong cnt0 = st->count();
   st->vprint(format, ap);
   julong cnt1 = st->count();
-  va_end(ap);
   return (int)(cnt1 - cnt0);
 }
 
