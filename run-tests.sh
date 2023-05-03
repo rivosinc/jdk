@@ -35,7 +35,14 @@ ARGS=(
     -testjdk:$(pwd)/build/${CONF}/images/jdk
     $(test -n "${NATIVEPATH}" && echo "-nativepath:${NATIVEPATH}"|| true)
     -exclude:${TESTSUITE}/ProblemList.txt
-    -exclude:${TESTSUITE}/ProblemList-GHA.txt
+    # -exclude:${TESTSUITE}/ProblemList-GHA.txt
+    -vmoption:-XX:+UnlockExperimentalVMOptions
+    -vmoption:-XX:+UseZicboz
+    -vmoption:-XX:+AllocatePrefetchZeroing
+    -vmoption:-XX:+UnlockDiagnosticVMOptions
+    -vmoption:-XX:+LogCompilation
+    -vmoption:-XX:-DisplayVMOutput
+    -vmoption:-XX:+PrintAssembly
 )
 
 build/${CONF}/images/jdk/bin/java ${ARGS[@]} ${*:-${TESTSUITE}}

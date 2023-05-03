@@ -1730,22 +1730,25 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       //   // Add `prefetch_lines` more cache lines
       //   new_pf_top += (prefetch_lines + 1) * AllocatePrefetchStepSize;
       //
-      //   if (new_pf_top > old_pf_top) {
+      //   if (old_pf_top < new_pf_top) {
       //     // store back `new_pf_top`
       //     Thread::current()->tlab().set_pf_top(new_pf_top);
       //
       //     do {
       //       cbo_zero(old_pf_top);
       //       old_pf_top += AllocatePrefetchStepSize;
-      //     } while (new_pf_top > old_pf_top)
+      //     } while (old_pf_top < new_pf_top)
       //   }
+
+      const uint step_size = AllocatePrefetchStepSize;
 
       Node *pf_region = new RegionNode(4);
       Node *pf_phi_rawmem = new PhiNode( pf_region, Type::MEMORY,
                                                 TypeRawPtr::BOTTOM );
       // I/O is used for Prefetch
       Node *pf_phi_abio = new PhiNode( pf_region, Type::ABIO );
-      Node *pf_phi_while = new PhiNode( pf_region, Type::ABIO );
+      Node *pf_phi_while = new PhiNode( pf_region, Type::MEMORY,
+                                                TypeRawPtr::BOTTOM );
 
       Node *thread = new ThreadLocalNode();
       transform_later(thread);
@@ -1763,12 +1766,12 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       Node *new_pf_top = new CastP2XNode(needgc_false, new_eden_top);
       transform_later(new_pf_top);
       new_pf_top = new AndXNode(new_pf_top,
-                                _igvn.MakeConX(~(intptr_t)(AllocatePrefetchStepSize - 1)));
+                                _igvn.MakeConX(~(intptr_t)(step_size - 1)));
       transform_later(new_pf_top);
       new_pf_top = new CastX2PNode(new_pf_top);
       transform_later(new_pf_top);
       new_pf_top = new AddPNode(new_pf_top, new_pf_top,
-                                _igvn.MakeConX((prefetch_lines + 1) * AllocatePrefetchStepSize));
+                                _igvn.MakeConX((prefetch_lines + 1) * step_size));
 
       // check against old_pf_top
       Node *need_pf_cmp = new CmpPNode( new_pf_top, old_pf_top );
@@ -1776,7 +1779,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       Node *need_pf_bol = new BoolNode( need_pf_cmp, BoolTest::gt );
       transform_later(need_pf_bol);
       IfNode *need_pf_iff = new IfNode( needgc_false, need_pf_bol,
-                                       PROB_STATIC_FREQUENT, COUNT_UNKNOWN );
+                                       PROB_FAIR, COUNT_UNKNOWN );
       transform_later(need_pf_iff);
 
       // true node, add prefetchdistance
@@ -1792,12 +1795,14 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
                                        MemNode::unordered);
       transform_later(store_new_wmt);
 
+      pf_phi_abio->init_req( fall_in_path, i_o );
+
       Node *prefetch = new PrefetchAllocationZeroingNode( i_o, old_pf_top );
       transform_later(prefetch);
       i_o = prefetch;
 
       old_pf_top = new AddPNode(prefetch, old_pf_top,
-                                _igvn.MakeConX(AllocatePrefetchStepSize));
+                                _igvn.MakeConX(step_size));
 
       // while (new_pf_top > old_pf_top)
       Node *while_pf_cmp = new CmpPNode( new_pf_top, old_pf_top );
@@ -1805,7 +1810,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       Node *while_pf_bol = new BoolNode( while_pf_cmp, BoolTest::gt );
       transform_later(while_pf_bol);
       IfNode *while_pf_iff = new IfNode( needgc_false, while_pf_bol,
-                                        PROB_FAIR, COUNT_UNKNOWN );
+                                        PROB_UNLIKELY_MAG(1), COUNT_UNKNOWN);
       transform_later(while_pf_iff);
       Node *while_pf_true = new IfTrueNode( while_pf_iff );
       transform_later(while_pf_true);
@@ -1814,11 +1819,14 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
 
       pf_phi_abio->set_req( pf_path, i_o );
 
+      pf_phi_while->set_req( fall_in_path, store_new_wmt );
+      pf_phi_while->set_req( pf_path, while_pf_true );
+
       pf_region->init_req( fall_in_path, need_pf_false );
       pf_region->init_req( pf_path, need_pf_true );
 
-      pf_phi_rawmem->init_req( fall_in_path, prefetch );
-      pf_phi_rawmem->init_req( pf_path, while_pf_false );
+      pf_phi_rawmem->init_req( fall_in_path, contended_phi_rawmem );
+      pf_phi_rawmem->init_req( pf_path, store_new_wmt );
 
       transform_later(pf_region);
       transform_later(pf_phi_rawmem);

@@ -51,6 +51,19 @@ inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
     // at least size below end, so the add can't wrap.
     set_top(obj + size);
 
+    if (AllocatePrefetchZeroing) {
+      const intptr_t prefetch_lines = AllocateInstancePrefetchLines;
+      const intptr_t prefetch_size = AllocatePrefetchStepSize;
+      const intptr_t prefetch_mask = ~(prefetch_size - 1);
+      const intptr_t prefetch_distance = (prefetch_lines + 1) * prefetch_size;
+      HeapWord *old_pf_top = pf_top();
+      HeapWord *new_pf_top = (HeapWord*)(((intptr_t)(obj + size) & prefetch_mask) + prefetch_distance);
+      if (old_pf_top < new_pf_top) {
+        set_pf_top(new_pf_top);
+        Copy::fill_to_aligned_words(old_pf_top, old_pf_top - new_pf_top, 0);
+      }
+    }
+
     invariants();
     return obj;
   }

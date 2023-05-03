@@ -136,7 +136,7 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
                                         Label& slow_case,
                                         bool is_far) {
   assert_different_registers(obj, tmp1, tmp2, noreg);
-  assert_different_registers(obj, var_size_in_bytes);
+  assert_different_registers(obj, var_size_in_bytes, tmp1, tmp2);
   Register end = tmp2;
 
   __ ld(obj, Address(xthread, JavaThread::tlab_top_offset()));
@@ -158,25 +158,26 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
 
   if (AllocatePrefetchZeroing) {
     Label LOOP, END;
-    const int pf_size = AllocatePrefetchStepSize;
-    const int pf_mask = ~(pf_size - 1);
-    const int pf_distance =
-      pf_size * (MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines) + 1);
+    const intptr_t prefetch_lines = MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines);
+    const intptr_t prefetch_size = AllocatePrefetchStepSize;
+    const intptr_t prefetch_mask = ~(prefetch_size - 1);
+    const intptr_t prefetch_distance = (prefetch_lines + 1) * prefetch_size;
     Register old_pf_top = tmp1, new_pf_top = tmp2 /* reuses tmp2 from end, no overlap */;
     // old_pf_top = Thread::curent()->tlab().pf_top();
     __ ld(old_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
-    // new_pf_top = (end & ~(pf_size - 1)) + pf_distance;
-    __ andi(new_pf_top, end, pf_mask);
-    __ addi(new_pf_top, new_pf_top, pf_distance);
+    // new_pf_top = (end & prefetch_mask) + prefetch_distance;
+    __ andi(new_pf_top, end, prefetch_mask);
+    __ addi(new_pf_top, new_pf_top, prefetch_distance);
     // if (old_pf_top < new_pf_top) {
     __ bgeu(old_pf_top, new_pf_top, END);
     // Thread::curent()->tlab().set_pf_top(new_pf_top)
-    __ sd(new_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+    __ sd(new_pf_top, Address(xthread, JavaThre,ad::tlab_pf_top_offset()));
     // do {
+    __ bind(LOOP);
     // zero-out cache line at old_pf_top
     __ cbo_zero(old_pf_top);
-    // old_pf_top += pf_size;
-    __ addi(old_pf_top, old_pf_top, pf_size);
+    // old_pf_top += prefetch_size;
+    __ addi(old_pf_top, old_pf_top, prefetch_size);
     // } while (old_pf_top < new_pf_top);
     __ bltu(old_pf_top, new_pf_top, LOOP);
     // }
