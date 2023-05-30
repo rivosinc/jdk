@@ -147,7 +147,6 @@ build-linux-amd64-fastdebug:
 
 build-linux-riscv64-fastdebug:
   extends: .build-linux
-  tags: ["22.04"]
   dependencies:
     - prepare-version
     - create-sysroot-riscv64
@@ -172,7 +171,6 @@ build-linux-amd64-release:
 
 build-linux-riscv64-release:
   extends: .build-linux
-  tags: ["22.04"]
   dependencies:
     - prepare-version
     - create-sysroot-riscv64
