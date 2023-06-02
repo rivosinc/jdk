@@ -185,7 +185,7 @@ build-linux-riscv64-release:
   stage: test
   image: ubuntu:20.04
   variables:
-    CONF_NAME: linux-${PKG_ARCH}-${DEBUG_LEVEL}
+    CONF: linux-${PKG_ARCH}-${DEBUG_LEVEL}
   script:
     - apt-get update
     - |
@@ -201,11 +201,10 @@ build-linux-riscv64-release:
     - mkdir $(pwd)/jtreg
     # QEMU_LD_PREFIX is only needed for risc v but it's easier to just set it for all configurations
     - make test-prebuilt \
-        CONF=${CONF_NAME} \
         QEMU_LD_PREFIX=$(pwd)/sysroot-${UBUNTU_CODENAME}-${PKG_ARCH} \
         BOOT_JDK=/usr/lib/jvm/temurin-${BUILD_JDK_VERSION} \
-        JDK_IMAGE_DIR=$(pwd)/build/${CONF_NAME}/images/jdk \
-        TEST_IMAGE_DIR=$(pwd)/build/${CONF_NAME}/images/test \
+        JDK_IMAGE_DIR=$(pwd)/build/${CONF}/images/jdk \
+        TEST_IMAGE_DIR=$(pwd)/build/${CONF}/images/test \
         JT_HOME=$(pwd)/jtreg \
         TEST="gtest:all"
 
