@@ -8,8 +8,8 @@ variables:
   CACHE_VERSION: "v6"
   BUILD_JDK_VERSION: "20"
   BINUTILS_VERSION: "2.38"
-  GTEST_TAG: v1.13.0
-  JTREG_VERSION: 7.2+1
+  GTEST_TAG: "v1.14.0"
+  JTREG_VERSION: "7.3.1+1"
 
 prepare-version:
   after_script:
