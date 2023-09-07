@@ -109,8 +109,7 @@ jobs:
               g++-${{ inputs.gcc-major-version }} \
               gcc-${{ inputs.gcc-major-version }}-${{ steps.platform-variables.outputs.gnu-arch }}-linux-gnu${{ steps.platform-variables.outputs.gnu-abi }} \
               g++-${{ inputs.gcc-major-version }}-${{ steps.platform-variables.outputs.gnu-arch }}-linux-gnu${{ steps.platform-variables.outputs.gnu-abi }} \
-              libxrandr-dev libxtst-dev libcups2-dev libasound2-dev \
-              debian-ports-archive-keyring
+              libxrandr-dev libxtst-dev libcups2-dev libasound2-dev
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ inputs.gcc-major-version }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ inputs.gcc-major-version }}
 
       - name: 'Create sysroot'
