@@ -102,6 +102,7 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(bool, UseRVC, false, "Use RVC instructions")                           \
   product(bool, UseRVA22U64, false, EXPERIMENTAL, "Use RVA22U64 profile")        \
   product(bool, UseRVV, false, EXPERIMENTAL, "Use RVV instructions")             \
+  product(bool, UseZacas, false, EXPERIMENTAL, "Use Zacas instructions")         \
   product(bool, UseZba, false, EXPERIMENTAL, "Use Zba instructions")             \
   product(bool, UseZbb, false, EXPERIMENTAL, "Use Zbb instructions")             \
   product(bool, UseZbs, false, EXPERIMENTAL, "Use Zbs instructions")             \
@@ -112,6 +113,9 @@ define_pd_global(intx, InlineSmallCode,          1000);
   product(bool, UseZtso, false, EXPERIMENTAL, "Assume Ztso memory model")        \
   product(bool, UseZihintpause, false, EXPERIMENTAL,                             \
           "Use Zihintpause instructions")                                        \
+  product(bool, UseZvkb, false, EXPERIMENTAL, "Use Zvkb instructions")           \
+  product(bool, UseZvknha, false, EXPERIMENTAL, "Use Zvknha instructions")       \
+  product(bool, UseZvknhb, false, EXPERIMENTAL, "Use Zvknhb instructions")       \
   product(bool, UseRVVForBigIntegerShiftIntrinsics, true,                        \
           "Use RVV instructions for left/right shift of BigInteger")
 
