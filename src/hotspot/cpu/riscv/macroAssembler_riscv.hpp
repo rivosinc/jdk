@@ -367,26 +367,24 @@ class MacroAssembler: public Assembler {
     return ((predecessor & 0x3) << 2) | (successor & 0x3);
   }
 
-  void pause() {
-    fence(w, 0);
-  }
-
   void fence(uint32_t predecessor, uint32_t successor) {
     if (UseZtso) {
-      // do not emit fence if it's not at least a StoreLoad fence
-      if (!((predecessor & w) && (successor & r))) {
-        return;
+      if ((pred_succ_to_membar_mask(predecessor, successor) & StoreLoad) == StoreLoad) {
+        // TSO allows for stores to be reordered after loads. When the compiler
+        // generates a fence to disallow that, we are required to generate the
+        // fence for correctness.
+        Assembler::fence(predecessor, successor);
+      } else {
+        // TSO guarantees other fences already.
       }
+    } else {
+      // always generate fence for RVWMO
+      Assembler::fence(predecessor, successor);
     }
-    if (UseConservativeFence) {
-      // extend rw -> iorw:
-      // 01(w) -> 0101(ow)
-      // 10(r) -> 1010(ir)
-      // 11(rw)-> 1111(iorw)
-      predecessor |= (predecessor & 0b11) << 2;
-      successor |= (successor & 0b11) << 2;
-    }
-    Assembler::fence(predecessor, successor);
+  }
+
+  void pause() {
+    Assembler::fence(w, 0);
   }
 
   // prints msg, dumps registers and stops execution
@@ -1471,8 +1469,8 @@ private:
   int bitset_to_regs(unsigned int bitset, unsigned char* regs);
   Address add_memory_helper(const Address dst, Register tmp);
 
-  void load_reserved(Register addr, enum operand_size size, Assembler::Aqrl acquire);
-  void store_conditional(Register addr, Register new_val, enum operand_size size, Assembler::Aqrl release);
+  void load_reserved(Register dst, Register addr, enum operand_size size, Assembler::Aqrl acquire);
+  void store_conditional(Register dst, Register new_val, Register addr, enum operand_size size, Assembler::Aqrl release);
 
 public:
   void fast_lock(Register obj, Register hdr, Register tmp1, Register tmp2, Label& slow);
