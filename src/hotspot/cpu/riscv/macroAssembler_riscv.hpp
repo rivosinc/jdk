@@ -361,6 +361,15 @@ class MacroAssembler: public Assembler {
                                        uint32_t& predecessor, uint32_t& successor) {
     predecessor = (order_constraint >> 2) & 0x3;
     successor = order_constraint & 0x3;
+
+    // extend rw -> iorw:
+    // 01(w) -> 0101(ow)
+    // 10(r) -> 1010(ir)
+    // 11(rw)-> 1111(iorw)
+    if (UseConservativeFence) {
+      predecessor |= predecessor << 2;
+      successor |= successor << 2;
+    }
   }
 
   static int pred_succ_to_membar_mask(uint32_t predecessor, uint32_t successor) {
