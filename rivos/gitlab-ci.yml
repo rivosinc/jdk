@@ -6,7 +6,7 @@ include:
 
 variables:
   CACHE_VERSION: "v6"
-  BUILD_JDK_VERSION: "20"
+  BUILD_JDK_VERSION: "21"
   BINUTILS_VERSION: "2.38"
   GTEST_TAG: "v1.14.0"
   JTREG_VERSION: "7.3.1+1"
