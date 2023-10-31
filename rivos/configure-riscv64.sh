@@ -6,7 +6,7 @@ ARGS=(
     --with-build-jdk=/rivos/jdk
     # --with-debug-level=slowdebug
     --with-zlib=system
-    --with-sysroot=/sysroot/focal-riscv64
+    --with-sysroot=/rivos/sysroot/riscv
     --with-jmh=/workspace/jmh/build/images/jmh
     --with-jtreg=/workspace/jtreg/build/images/jtreg
     --with-hsdis=binutils --with-binutils-src=/workspace/binutils --enable-hsdis-bundling
