@@ -174,7 +174,10 @@ class AsyncLogWriter : public NonJavaThread {
   void enqueue_locked(LogFileStreamOutput* output, const LogDecorations& decorations, const char* msg);
   void write(AsyncLogMap<AnyObj::RESOURCE_AREA>& snapshot);
   void run() override;
-  const char* name() const override { return "AsyncLog Thread"; }
+  void pre_run() override {
+    NonJavaThread::pre_run();
+    log_debug(logging, thread)("starting %s tid = " INTX_FORMAT, name(), os::current_thread_id());
+  }
   const char* type_name() const override { return "AsyncLogWriter"; }
   void print_on(outputStream* st) const override {
     st->print("\"%s\" ", name());
@@ -199,6 +202,8 @@ class AsyncLogWriter : public NonJavaThread {
   static AsyncLogWriter* instance();
   static void initialize();
   static void flush();
+
+  const char* name() const override { return "AsyncLog Thread"; }
 };
 
 #endif // SHARE_LOGGING_LOGASYNCWRITER_HPP
