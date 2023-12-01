@@ -1062,6 +1062,19 @@ public:
   void atomic_xchgwu(Register prev, Register newv, Register addr);
   void atomic_xchgalwu(Register prev, Register newv, Register addr);
 
+  void atomic_cas(Register prev, Register newv, Register addr);
+  void atomic_casw(Register prev, Register newv, Register addr);
+  void atomic_casl(Register prev, Register newv, Register addr);
+  void atomic_caslw(Register prev, Register newv, Register addr);
+  void atomic_casal(Register prev, Register newv, Register addr);
+  void atomic_casalw(Register prev, Register newv, Register addr);
+  void atomic_caswu(Register prev, Register newv, Register addr);
+  void atomic_caslwu(Register prev, Register newv, Register addr);
+  void atomic_casalwu(Register prev, Register newv, Register addr);
+
+  void atomic_cas(Register prev, Register newv, Register addr, enum operand_size size,
+              Assembler::Aqrl acquire = Assembler::relaxed, Assembler::Aqrl release = Assembler::relaxed);
+
   static bool far_branches() {
     return ReservedCodeCacheSize > branch_range;
   }
@@ -1356,6 +1369,14 @@ public:
     vmfle_vv(vd, vs1, vs2, vm);
   }
 
+  inline void vmsltu_vi(VectorRegister Vd, VectorRegister Vs2, int32_t imm, VectorMask vm = unmasked) {
+    vmsleu_vi(Vd, Vs2, imm-1, vm);
+  }
+
+  inline void vmsgeu_vi(VectorRegister Vd, VectorRegister Vs2, int32_t imm, VectorMask vm = unmasked) {
+    vmsgtu_vi(Vd, Vs2, imm-1, vm);
+  }
+
   // Copy mask register
   inline void vmmv_m(VectorRegister vd, VectorRegister vs) {
     vmand_mm(vd, vs, vs);
@@ -1369,6 +1390,10 @@ public:
   // Set mask register
   inline void vmset_m(VectorRegister vd) {
     vmxnor_mm(vd, vd, vd);
+  }
+
+  inline void vnot_v(VectorRegister Vd, VectorRegister Vs, VectorMask vm = unmasked) {
+    vxor_vi(Vd, Vs, -1, vm);
   }
 
   static const int zero_words_block_size;
