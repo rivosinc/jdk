@@ -10,6 +10,10 @@ variables:
   BINUTILS_VERSION: "2.38"
   GTEST_TAG: "v1.14.0"
   JTREG_VERSION: "7.3.1+1"
+  MARCH_AMD64: "x86-64-v3"
+  # MARCH_RISCV64: "rv64gcv_zvl256b_zba_zbb_zbs_zicond_zfa_ztso_zacas" # Zicond/Zfa/Ztso/Zacas not supported by GCC yet
+  MARCH_RISCV64: "rv64gcv_zvl256b_zba_zbb_zbs"
+  QEMU_CPU: rv64,v=true,vlen=256,elen=64,vext_spec=v1.0,zba=true,zbb=true,zbs=true
 
 prepare-version:
   after_script:
@@ -33,11 +37,11 @@ download-tools:
   stage: prebuild
   image: gitlab.ba.rivosinc.com:5050/rv/it/int/rivos-sdk:latest
   script:
-    - apt-get update
-    - |
-      apt-get install -y                                                       \
-        curl                                                                   \
-        zip
+    - >
+      apt-get update -qq &&
+      apt-get install -qq -y
+      curl
+      zip
     - |
       curl -L https://builds.shipilev.net/jtreg/jtreg-${JTREG_VERSION}.zip > jtreg.zip
       unzip jtreg.zip
@@ -53,21 +57,21 @@ download-tools:
   variables:
     CONF_NAME: linux-${PKG_ARCH}-${DEBUG_LEVEL}
   script:
-    - apt-get update
-    - |
-      apt-get install -y                                                       \
-        autoconf                                                               \
-        build-essential                                                        \
-        curl                                                                   \
-        file                                                                   \
-        g++                                                                    \
-        gcc                                                                    \
-        git                                                                    \
-        $(test "${PKG_ARCH}" = "riscv64" && echo "g++-riscv64-linux-gnu" || true) \
-        $(test "${PKG_ARCH}" = "riscv64" && echo "gcc-riscv64-linux-gnu" || true) \
-        unzip                                                                  \
-        zip                                                                    \
-        zlib1g-dev
+    - >
+      apt-get update -qq &&
+      apt-get install -qq -y
+      autoconf
+      build-essential
+      curl
+      file
+      g++
+      gcc
+      git
+      $(test "${PKG_ARCH}" = "riscv64" && echo "g++-12-riscv64-linux-gnu" || true)
+      $(test "${PKG_ARCH}" = "riscv64" && echo "gcc-12-riscv64-linux-gnu" || true)
+      unzip
+      zip
+      zlib1g-dev
     - |
       mkdir -p /usr/lib/jvm/temurin-${BUILD_JDK_VERSION}
       curl -L https://api.adoptium.net/v3/binary/latest/${BUILD_JDK_VERSION}/ea/linux/x64/jdk/hotspot/normal/eclipse\?project\=jdk \
@@ -77,23 +81,27 @@ download-tools:
       curl -L https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_VERSION}.tar.gz \
         | tar -xzf - -C binutils --strip-components 1
     - git clone https://github.com/google/googletest.git -b ${GTEST_TAG} googletest
-    - |
-      bash configure                                                           \
-        --with-debug-level=${DEBUG_LEVEL}                                      \
-        --openjdk-target=${PKG_ARCH}-linux-gnu                                 \
-        --with-conf-name=${CONF_NAME}                                          \
-        --with-vendor-name="Rivos Inc"                                         \
-        --with-version-pre="${JDK_VERSION_PRE}"                                \
-        --with-version-opt="${JDK_VERSION_OPT}"                                \
-        $(test "${PKG_ARCH}" = "riscv64" && echo "--with-sysroot=/rivos/sysroot/riscv" || true) \
-        --with-boot-jdk=/usr/lib/jvm/temurin-${BUILD_JDK_VERSION}              \
-        --disable-precompiled-headers                                          \
-        --with-zlib=system                                                     \
-        --with-gtest=$(pwd)/googletest                                         \
-        --with-jtreg=$(pwd)/jtreg                                              \
-        --with-hsdis=binutils                                                  \
-        --with-binutils-src=binutils                                           \
-        --enable-hsdis-bundling
+    - >
+      bash configure
+      $(test "${PKG_ARCH}" = "riscv64" && echo "CC=riscv64-linux-gnu-gcc-12" || true)
+      $(test "${PKG_ARCH}" = "riscv64" && echo "CXX=riscv64-linux-gnu-g++-12" || true)
+      --with-debug-level=${DEBUG_LEVEL}
+      --openjdk-target=${PKG_ARCH}-linux-gnu
+      --with-conf-name=${CONF_NAME}
+      --with-vendor-name="Rivos Inc"
+      --with-version-pre="${JDK_VERSION_PRE}"
+      --with-version-opt="${JDK_VERSION_OPT}"
+      $(test "${PKG_ARCH}" = "riscv64" && echo "--with-sysroot=/rivos/sysroot/riscv" || true)
+      --with-boot-jdk=/usr/lib/jvm/temurin-${BUILD_JDK_VERSION}
+      --disable-precompiled-headers
+      --with-zlib=system
+      --with-gtest=$(pwd)/googletest
+      --with-jtreg=$(pwd)/jtreg
+      --with-hsdis=binutils
+      --with-binutils-src=binutils
+      --enable-hsdis-bundling
+      --with-extra-cflags="-march=${MARCH}"
+      --with-extra-cxxflags="-march=${MARCH}"
     - make jdk-image test-image LOG_LEVEL=info
   artifacts:
     when: always
@@ -123,6 +131,7 @@ build-linux-amd64-fastdebug:
   variables:
     PKG_ARCH: amd64
     DEBUG_LEVEL: fastdebug
+    MARCH: ${MARCH_AMD64}
 
 build-linux-riscv64-fastdebug:
   extends: .build-linux
@@ -131,6 +140,7 @@ build-linux-riscv64-fastdebug:
   variables:
     PKG_ARCH: riscv64
     DEBUG_LEVEL: fastdebug
+    MARCH: ${MARCH_RISCV64}
 
 build-linux-amd64-release:
   extends: .build-linux
@@ -139,6 +149,7 @@ build-linux-amd64-release:
   variables:
     PKG_ARCH: amd64
     DEBUG_LEVEL: release
+    MARCH: ${MARCH_AMD64}
 
 build-linux-riscv64-release:
   extends: .build-linux
@@ -147,6 +158,7 @@ build-linux-riscv64-release:
   variables:
     PKG_ARCH: riscv64
     DEBUG_LEVEL: release
+    MARCH: ${MARCH_RISCV64}
 
 .run-gtests:
   stage: test
