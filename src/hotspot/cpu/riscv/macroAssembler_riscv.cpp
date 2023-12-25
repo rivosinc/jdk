@@ -2725,9 +2725,9 @@ void MacroAssembler::safepoint_poll(Label& slow_path, bool at_return, bool acqui
 
 void MacroAssembler::cmpxchgptr(Register oldv, Register newv, Register addr, Register tmp,
                                 Label &succeed, Label *fail) {
-  assert_different_registers(addr, tmp);
-  assert_different_registers(newv, tmp);
-  assert_different_registers(oldv, tmp);
+  assert_different_registers(addr, tmp, t0);
+  assert_different_registers(newv, tmp, t0);
+  assert_different_registers(oldv, tmp, t0);
 
   // oldv holds comparison value
   // newv holds value to write in exchange
@@ -2750,8 +2750,10 @@ void MacroAssembler::cmpxchgptr(Register oldv, Register newv, Register addr, Reg
     j(retry_load);
 
     bind(nope);
-    membar(AnyAny);
   }
+
+  // neither amocas nor lr/sc have an implied barrier in the failing case
+  membar(AnyAny);
 
   mv(oldv, tmp);
   if (fail != nullptr) {
@@ -2778,7 +2780,7 @@ void MacroAssembler::load_reserved(Register dst,
       break;
     case uint32:
       lr_w(dst, addr, acquire);
-      zero_extend(t0, t0, 32);
+      zero_extend(dst, dst, 32);
       break;
     default:
       ShouldNotReachHere();
@@ -2862,7 +2864,7 @@ void MacroAssembler::cmpxchg_narrow_value(Register addr, Register expected,
     andr(tmp, old, not_mask);
     orr(tmp, tmp, new_val);
 
-    atomic_cas(old, tmp, aligned_addr, size, acquire, release);
+    atomic_cas(old, tmp, aligned_addr, operand_size::int32, acquire, release);
     bne(tmp, old, retry);
   } else {
     lr_w(old, aligned_addr, acquire);
@@ -2923,7 +2925,7 @@ void MacroAssembler::weak_cmpxchg_narrow_value(Register addr, Register expected,
     andr(tmp, old, not_mask);
     orr(tmp, tmp, new_val);
 
-    atomic_cas(tmp, new_val, addr, size, acquire, release);
+    atomic_cas(tmp, new_val, addr, operand_size::int32, acquire, release);
     bne(tmp, old, fail);
   } else {
     lr_w(old, aligned_addr, acquire);
@@ -2964,9 +2966,7 @@ void MacroAssembler::cmpxchg(Register addr, Register expected,
       xorr(t0, t0, expected);
       seqz(result, t0);
     } else {
-      if (result != expected) {
-        mv(result, expected);
-      }
+      mv(result, expected);
       atomic_cas(result, new_val, addr, size, acquire, release);
     }
     return;
@@ -3004,7 +3004,7 @@ void MacroAssembler::cmpxchg_weak(Register addr, Register expected,
                                   Assembler::Aqrl acquire, Assembler::Aqrl release,
                                   Register result) {
   if (UseZacas) {
-    cmpxchg(addr, expected, new_val, size, acquire, release, result, false);
+    cmpxchg(addr, expected, new_val, size, acquire, release, result, true);
     return;
   }
 
@@ -3091,7 +3091,7 @@ ATOMIC_CAS(casalw, amocas_w, Assembler::aq, Assembler::rl)
 
 #undef ATOMIC_CAS
 
-#define ATOMIC_CASU(OP1, OP2)                                                       \
+#define ATOMIC_CASU(OP1, OP2)                                                        \
 void MacroAssembler::atomic_##OP1(Register prev, Register newv, Register addr) {     \
   atomic_##OP2(prev, newv, addr);                                                    \
   zero_extend(prev, prev, 32);                                                       \
