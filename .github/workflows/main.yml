@@ -26,11 +26,12 @@
 name: 'OpenJDK GHA Sanity Checks'
 
 on:
+  pull_request:
+    branches:
+      - rivos/main
   push:
-    branches-ignore:
-      - master
-      - pr/*
-      - jdk*
+    branches:
+      - rivos/main
   workflow_dispatch:
     inputs:
       platforms:
@@ -81,7 +82,7 @@ jobs:
           function check_platform() {
             if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
               input='${{ github.event.inputs.platforms }}'
-            elif [[ $GITHUB_EVENT_NAME == push ]]; then
+            elif [[ $GITHUB_EVENT_NAME == push || $GITHUB_EVENT_NAME == pull_request ]]; then
               if [[ '${{ !secrets.JDK_SUBMIT_FILTER || startsWith(github.ref, 'refs/heads/submit/') }}' == 'false' ]]; then
                 # If JDK_SUBMIT_FILTER is set, and this is not a "submit/" branch, don't run anything
                 >&2 echo 'JDK_SUBMIT_FILTER is set and not a "submit/" branch'
