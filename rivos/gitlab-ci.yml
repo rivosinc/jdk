@@ -9,7 +9,7 @@ variables:
   BUILD_JDK_VERSION: "23"
   BINUTILS_VERSION: "2.38"
   GTEST_TAG: "v1.14.0"
-  JTREG_VERSION: "7.3.1+1"
+  JTREG_VERSION: "7.4+1"
   MARCH_AMD64: "x86-64-v3"
   # MARCH_RISCV64: "rv64gcv_zvl256b_zba_zbb_zbs_zicond_zfa_ztso_zacas" # Zicond/Zfa/Ztso/Zacas not supported by GCC yet
   MARCH_RISCV64: "rv64gcv_zvl256b_zba_zbb_zbs"
