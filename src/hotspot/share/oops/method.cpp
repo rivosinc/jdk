@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "cds/cdsConfig.hpp"
 #include "cds/cppVtables.hpp"
 #include "cds/metaspaceShared.hpp"
@@ -32,6 +31,7 @@
 #include "classfile/symbolTable.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmClasses.hpp"
+#include "code/aotCodeCache.hpp"
 #include "code/codeCache.hpp"
 #include "code/debugInfoRec.hpp"
 #include "compiler/compilationPolicy.hpp"
@@ -60,6 +60,7 @@
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbol.hpp"
+#include "oops/trainingData.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/atomic.hpp"
@@ -135,6 +136,7 @@ void Method::deallocate_contents(ClassLoaderData* loader_data) {
   clear_method_data();
   MetadataFactory::free_metadata(loader_data, method_counters());
   clear_method_counters();
+  set_adapter_entry(nullptr);
   // The nmethod will be gone when we get here.
   if (code() != nullptr) _code = nullptr;
 }
@@ -386,13 +388,14 @@ Symbol* Method::klass_name() const {
 }
 
 void Method::metaspace_pointers_do(MetaspaceClosure* it) {
-  log_trace(cds)("Iter(Method): %p", this);
+  log_trace(aot)("Iter(Method): %p", this);
 
   if (!method_holder()->is_rewritten()) {
     it->push(&_constMethod, MetaspaceClosure::_writable);
   } else {
     it->push(&_constMethod);
   }
+  it->push(&_adapter);
   it->push(&_method_data);
   it->push(&_method_counters);
   NOT_PRODUCT(it->push(&_name);)
@@ -406,11 +409,31 @@ void Method::metaspace_pointers_do(MetaspaceClosure* it) {
 
 void Method::remove_unshareable_info() {
   unlink_method();
+  if (method_data() != nullptr) {
+    method_data()->remove_unshareable_info();
+  }
+  if (method_counters() != nullptr) {
+    method_counters()->remove_unshareable_info();
+  }
+  if (CDSConfig::is_dumping_adapters() && _adapter != nullptr) {
+    _adapter->remove_unshareable_info();
+    _adapter = nullptr;
+  }
   JFR_ONLY(REMOVE_METHOD_ID(this);)
 }
 
 void Method::restore_unshareable_info(TRAPS) {
   assert(is_method() && is_valid_method(this), "ensure C++ vtable is restored");
+  if (method_data() != nullptr) {
+    method_data()->restore_unshareable_info(CHECK);
+  }
+  if (method_counters() != nullptr) {
+    method_counters()->restore_unshareable_info(CHECK);
+  }
+  if (_adapter != nullptr) {
+    assert(_adapter->is_linked(), "must be");
+    _from_compiled_entry = _adapter->get_c2i_entry();
+  }
   assert(!queued_for_compilation(), "method's queued_for_compilation flag should not be set");
 }
 #endif
@@ -434,7 +457,7 @@ void Method::set_itable_index(int index) {
     // itable index should be the same as the runtime index.
     assert(_vtable_index == itable_index_max - index,
            "archived itable index is different from runtime index");
-    return; // don’t write into the shared class
+    return; // don't write into the shared class
   } else {
     _vtable_index = itable_index_max - index;
   }
@@ -578,9 +601,43 @@ void Method::print_invocation_count(outputStream* st) {
 #endif
 }
 
+MethodTrainingData* Method::training_data_or_null() const {
+  MethodCounters* mcs = method_counters();
+  if (mcs == nullptr) {
+    return nullptr;
+  } else {
+    MethodTrainingData* mtd = mcs->method_training_data();
+    if (mtd == mcs->method_training_data_sentinel()) {
+      return nullptr;
+    }
+    return mtd;
+  }
+}
+
+bool Method::init_training_data(MethodTrainingData* td) {
+  MethodCounters* mcs = method_counters();
+  if (mcs == nullptr) {
+    return false;
+  } else {
+    return mcs->init_method_training_data(td);
+  }
+}
+
+bool Method::install_training_method_data(const methodHandle& method) {
+  MethodTrainingData* mtd = MethodTrainingData::find(method);
+  if (mtd != nullptr && mtd->final_profile() != nullptr) {
+    Atomic::replace_if_null(&method->_method_data, mtd->final_profile());
+    return true;
+  }
+  return false;
+}
+
 // Build a MethodData* object to hold profiling information collected on this
 // method when requested.
 void Method::build_profiling_method_data(const methodHandle& method, TRAPS) {
+  if (install_training_method_data(method)) {
+    return;
+  }
   // Do not profile the method if metaspace has hit an OOM previously
   // allocating profiling data. Callers clear pending exception so don't
   // add one here.
@@ -971,7 +1028,7 @@ void Method::set_native_function(address function, bool post_event_flag) {
   // If so, we have to make it not_entrant.
   nmethod* nm = code(); // Put it into local variable to guard against concurrent updates
   if (nm != nullptr) {
-    nm->make_not_entrant();
+    nm->make_not_entrant(nmethod::InvalidationReason::SET_NATIVE_FUNCTION);
   }
 }
 
@@ -1021,7 +1078,7 @@ void Method::print_made_not_compilable(int comp_level, bool is_osr, bool report,
   }
   if ((TraceDeoptimization || LogCompilation) && (xtty != nullptr)) {
     ttyLocker ttyl;
-    xtty->begin_elem("make_not_compilable thread='" UINTX_FORMAT "' osr='%d' level='%d'",
+    xtty->begin_elem("make_not_compilable thread='%zu' osr='%d' level='%d'",
                      os::current_thread_id(), is_osr, comp_level);
     if (reason != nullptr) {
       xtty->print(" reason=\'%s\'", reason);
@@ -1138,7 +1195,9 @@ void Method::unlink_code() {
 void Method::unlink_method() {
   assert(CDSConfig::is_dumping_archive(), "sanity");
   _code = nullptr;
-  _adapter = nullptr;
+  if (!CDSConfig::is_dumping_adapters() || AdapterHandlerLibrary::is_abstract_method_adapter(_adapter)) {
+    _adapter = nullptr;
+  }
   _i2i_entry = nullptr;
   _from_compiled_entry = nullptr;
   _from_interpreted_entry = nullptr;
@@ -1151,6 +1210,12 @@ void Method::unlink_method() {
 
   clear_method_data();
   clear_method_counters();
+  clear_is_not_c1_compilable();
+  clear_is_not_c1_osr_compilable();
+  clear_is_not_c2_compilable();
+  clear_is_not_c2_osr_compilable();
+  clear_queued_for_compilation();
+
   remove_unshareable_flags();
 }
 
@@ -1179,14 +1244,18 @@ void Method::link_method(const methodHandle& h_method, TRAPS) {
   // If the code cache is full, we may reenter this function for the
   // leftover methods that weren't linked.
   if (adapter() != nullptr) {
-    return;
+    if (adapter()->is_shared()) {
+      assert(adapter()->is_linked(), "Adapter is shared but not linked");
+    } else {
+      return;
+    }
   }
   assert( _code == nullptr, "nothing compiled yet" );
 
   // Setup interpreter entrypoint
   assert(this == h_method(), "wrong h_method()" );
 
-  assert(adapter() == nullptr, "init'd to null");
+  assert(adapter() == nullptr || adapter()->is_linked(), "init'd to null or restored from cache");
   address entry = Interpreter::entry_for_method(h_method);
   assert(entry != nullptr, "interpreter entry must be non-null");
   // Sets both _i2i_entry and _from_interpreted_entry
@@ -1207,7 +1276,10 @@ void Method::link_method(const methodHandle& h_method, TRAPS) {
   // called from the vtable.  We need adapters on such methods that get loaded
   // later.  Ditto for mega-morphic itable calls.  If this proves to be a
   // problem we'll make these lazily later.
-  (void) make_adapters(h_method, CHECK);
+  if (_adapter == nullptr) {
+    (void) make_adapters(h_method, CHECK);
+    assert(adapter()->is_linked(), "Adapter must have been linked");
+  }
 
   // ONLY USE the h_method now as make_adapter may have blocked
 
@@ -1257,7 +1329,7 @@ address Method::make_adapters(const methodHandle& mh, TRAPS) {
 // or adapter that it points to is still live and valid.
 // This function must not hit a safepoint!
 address Method::verified_code_entry() {
-  debug_only(NoSafepointVerifier nsv;)
+  DEBUG_ONLY(NoSafepointVerifier nsv;)
   assert(_from_compiled_entry != nullptr, "must be set");
   return _from_compiled_entry;
 }
@@ -1435,7 +1507,7 @@ methodHandle Method::make_method_handle_intrinsic(vmIntrinsics::ID iid,
   cp->set_is_for_method_handle_intrinsic();
 
   // decide on access bits:  public or not?
-  int flags_bits = (JVM_ACC_NATIVE | JVM_ACC_SYNTHETIC | JVM_ACC_FINAL);
+  u2 flags_bits = (JVM_ACC_NATIVE | JVM_ACC_SYNTHETIC | JVM_ACC_FINAL);
   bool must_be_static = MethodHandles::is_signature_polymorphic_static(iid);
   if (must_be_static)  flags_bits |= JVM_ACC_STATIC;
   assert((flags_bits & JVM_ACC_PUBLIC) == 0, "do not expose these methods");
@@ -1483,6 +1555,9 @@ methodHandle Method::make_method_handle_intrinsic(vmIntrinsics::ID iid,
 
 #if INCLUDE_CDS
 void Method::restore_archived_method_handle_intrinsic(methodHandle m, TRAPS) {
+  if (m->adapter() != nullptr) {
+    m->set_from_compiled_entry(m->adapter()->get_c2i_entry());
+  }
   m->link_method(m, CHECK);
 
   if (m->intrinsic_id() == vmIntrinsics::_linkToNative) {
@@ -1919,39 +1994,6 @@ void Method::clear_all_breakpoints() {
 }
 
 #endif // INCLUDE_JVMTI
-
-int Method::invocation_count() const {
-  MethodCounters* mcs = method_counters();
-  MethodData* mdo = method_data();
-  if (((mcs != nullptr) ? mcs->invocation_counter()->carry() : false) ||
-      ((mdo != nullptr) ? mdo->invocation_counter()->carry() : false)) {
-    return InvocationCounter::count_limit;
-  } else {
-    return ((mcs != nullptr) ? mcs->invocation_counter()->count() : 0) +
-           ((mdo != nullptr) ? mdo->invocation_counter()->count() : 0);
-  }
-}
-
-int Method::backedge_count() const {
-  MethodCounters* mcs = method_counters();
-  MethodData* mdo = method_data();
-  if (((mcs != nullptr) ? mcs->backedge_counter()->carry() : false) ||
-      ((mdo != nullptr) ? mdo->backedge_counter()->carry() : false)) {
-    return InvocationCounter::count_limit;
-  } else {
-    return ((mcs != nullptr) ? mcs->backedge_counter()->count() : 0) +
-           ((mdo != nullptr) ? mdo->backedge_counter()->count() : 0);
-  }
-}
-
-int Method::highest_comp_level() const {
-  const MethodCounters* mcs = method_counters();
-  if (mcs != nullptr) {
-    return mcs->highest_comp_level();
-  } else {
-    return CompLevel_none;
-  }
-}
 
 int Method::highest_osr_comp_level() const {
   const MethodCounters* mcs = method_counters();
