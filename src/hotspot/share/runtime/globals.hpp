@@ -695,7 +695,7 @@ const int ObjectAlignmentInBytes = 8;
           "Tell whether the VM should register soft/weak/final/phantom "    \
           "references")                                                     \
                                                                             \
-  develop(bool, PrintCodeCacheExtension, false,                             \
+  product(bool, PrintCodeCacheExtension, false,                             \
           "Print extension of code cache")                                  \
                                                                             \
   product(bool, ClassUnloading, true,                                       \
